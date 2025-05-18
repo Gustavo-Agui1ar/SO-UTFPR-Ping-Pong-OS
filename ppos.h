@@ -287,6 +287,7 @@ void print_tcb( task_t* task );
 #define STACKSIZE              32768
 
 #define PRINT_READY_QUEUE      queue_print ("Ready Queue", (queue_t*)readyQueue, (void*)&print_tcb );
+#define PRINT_SLEEP_QUEUE      queue_print ("Sleep Queue", (queue_t*)sleepQueue, (void*)&print_tcb );
 
 #define PPOS_PREEMPT_ENABLE  preemption = 1;
 #define PPOS_PREEMPT_DISABLE preemption = 0;

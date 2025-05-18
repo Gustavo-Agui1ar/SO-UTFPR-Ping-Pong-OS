@@ -3,7 +3,7 @@ CC = gcc
 CFLAGS = -Wall -g
 
 # Arquivos-fonte
-OBJS = pingpong-preempcao.o ppos-core-aux.o ppos-all.o queue.o
+OBJS = pingpong-contab-prio.o ppos-core-aux.o ppos-all.o queue.o
 
 # Executável final
 TARGET = test

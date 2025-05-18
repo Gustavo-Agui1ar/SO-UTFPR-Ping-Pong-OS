@@ -30,6 +30,7 @@ typedef struct task_t
    char prio_dynamic; // prioridade dinamica
    int running_time; // tempo de execução da tarefa 
    unsigned int task_create_time; // tempo de criação da tarefa
+   unsigned int task_death_time; // tempo de morte da tarefa
    char quantum; // tempo de execução da tarefa
    unsigned int activations;
 
