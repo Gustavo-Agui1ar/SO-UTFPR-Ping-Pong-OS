@@ -17,7 +17,7 @@
 #define PRIO_MIN_TASK -20
 #define PRIO_MAX_TASK 20
 #define QUANTUM 20
-#define DEBUG
+//#define DEBUG
 
 unsigned int _systemTime = 0;
 
@@ -40,18 +40,7 @@ void before_ppos_init () {
         printf("\ninit - BEFORE");
     #endif
 
-    setvbuf (stdout, 0, _IONBF, 0) ;
-  
-    taskMain = (task_t*)malloc(sizeof(task_t));
-
-    if(taskMain == NULL) {
-        perror("error inicializing task main\n");
-        exit(1);
-    }
-
-    task_setProperties(taskMain, 20);
-
-    taskExec = taskMain;
+    setvbuf (stdout, 0, _IONBF, 0);
 }
 
 void after_ppos_init () {
@@ -61,6 +50,13 @@ void after_ppos_init () {
 #endif
     _systemTime = 0;
    
+    task_setProperties(taskMain, 20);
+    
+    if(!taskMain) {
+        perror("error initializing task main\n");
+        exit(1);
+    }
+
     if(initTimer()) {
         perror("ppos_init: error in setitimer");
         exit(1);
@@ -453,7 +449,7 @@ task_t* scheduler() {
 
     //encontra o elemento de maior prioridade
     task_t* task = findByPriority(readyQueue);
-    PRINT_READY_QUEUE    
+    //PRINT_READY_QUEUE    
     
     if(!task) return NULL;
     
@@ -609,18 +605,18 @@ void task_set_eet(task_t* task, int eet) {
 
 void handleTimer(int signum) {
   
-  #ifdef DEBUG
-  //printf("\n handleTimer: task:  %d  ticks:  %d \n", currentTask->id, currentTask->quantum);
-  #endif
-
+    #ifdef DEBUG
+      //printf("\nhandleTimer: - [%d] Quantum: %d - Time: %d\n", taskExec->id, taskExec->quantum, _systemTime);
+    #endif
+    
   taskExec->running_time++;
   taskExec->quantum--;
   _systemTime++;
 
-  if(taskExec == NULL || taskExec->running_time)
+  if(taskExec == NULL)
     return;
   
-  if(taskExec->quantum == 0) {
+  if(taskExec->quantum <= 0) {
     task_yield();
     return;
   }
