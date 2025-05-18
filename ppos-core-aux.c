@@ -442,226 +442,227 @@ int after_mqueue_msgs (mqueue_t *queue) {
     return 0;
 }
 
-//------------------------------------------------------------ funcoes criadas para o escalonamento-----------------------------------------------------------------------------
-
+//------------------------------------------------------------ ESCALONAMENTO -----------------------------------------------------------------
 
 task_t* scheduler() {
+    // Encontra a task com maior prioridade
+    task_t* selected_task = findByPriority(readyQueue);
+    
+    if (!selected_task)
+        return NULL;
 
-    //encontra o elemento de maior prioridade
-    task_t* task = findByPriority(readyQueue);
-    //PRINT_READY_QUEUE    
-    
-    if(!task) return NULL;
-    
     #ifdef DEBUG
-    printf("\nscheduler: - Maior prioridade: %d - Tarefa: %d\n", task->prio_dynamic, task->id);
+    printf("\n[scheduler] Selecionada tarefa %d com prioridade dinâmica %d\n", 
+           selected_task->id, selected_task->prio_dynamic);
     #endif
- 
-    //envelhece as outras tasks;
+
+    // Envelhece todas as tarefas (exceto a selecionada)
     growAll(readyQueue);
-    //devolve a task sua prioridade original
-    task_setDynamicPrio(task, task->prio_static);
-    
-  return task;
+
+    // Restaura a prioridade dinâmica da tarefa selecionada
+    task_setDynamicPrio(selected_task, selected_task->prio_static);
+
+    return selected_task;
 }
 
 task_t* findByPriority(task_t* queue) {
+    if (!queue)
+        return NULL;
 
-    //fila sem elementos
-    if(!queue)
-    return NULL;
+    if (queue->next == queue)
+        return queue;
 
-    if(queue->next == queue)
-    return queue;
+    task_t* current = queue;
+    task_t* best = queue;
 
-    task_t* currentQ = queue;
-    task_t* highestPrio = queue;
+    // Varre a fila circular procurando a task com maior prioridade
+    do {
+        best = verifyPriority(current, best);
+        current = current->next;
+    } while (current != queue);
 
-    do {//escolhe pelo de maior prioridade dinamica, estatica, e por quem foi criado antes
-
-        highestPrio = verifyPriority(currentQ, highestPrio);
-        currentQ = currentQ->next; 
-    } while (currentQ != queue);  // Continua até voltar ao início da fila
-
-
-
-    return highestPrio;
+    return best;
 }
 
-task_t* verifyPriority(task_t* current, task_t* highest) {
-    
-    if(current->prio_dynamic < highest->prio_dynamic) 
-    return current;
-    
-    if(current->prio_dynamic > highest->prio_dynamic)
-    return highest;
-    
-    //se passou pelos 2 ifs significa que dynamic prio é igual
-    
-    if(current->prio_static < highest->prio_static)
-    return current;
-    
-    if(current->prio_static > highest->prio_static)
-    return highest;
-    
-    //se passou pelos 2 ifs significa que static prio é iguasl
-    
-    if(current->id < highest->id)
-    return current;
-    
-    return highest;
+task_t* verifyPriority(task_t* current, task_t* best) {
+    if (current->prio_dynamic < best->prio_dynamic)
+        return current;
+
+    if (current->prio_dynamic > best->prio_dynamic)
+        return best;
+
+    if (current->prio_static < best->prio_static)
+        return current;
+
+    if (current->prio_static > best->prio_static)
+        return best;
+
+    if (current->id < best->id)
+        return current;
+
+    return best;
 }
 
 void growAll(task_t* queue) {
-    
-    //fila sem elementos
-    if(!queue)
-    return;
-    
-    task_t* currentQ = queue;
-    
+    if (!queue)
+        return;
+
+    task_t* current = queue;
+
     do {
-        task_setDynamicPrio(currentQ, currentQ->prio_dynamic + GROWTH_FACTOR);
-        currentQ = currentQ->next;
-    } while(currentQ->next != queue);
+        // Evita envelhecer a task que será executada (ela ainda não foi retirada da fila)
+        if (current != taskExec) {
+            task_setDynamicPrio(current, current->prio_dynamic + GROWTH_FACTOR);
+            #ifdef DEBUG
+            printf("[growAll] Tarefa %d envelheceu para prioridade %d\n", current->id, current->prio_dynamic);
+            #endif
+        }
+        current = current->next;
+    } while (current != queue);
 }
 
 
-//------------------------------------------------------------ funcoes criadas para prioridade-----------------------------------------------------------------------------
+//------------------------------------------------------------ PRIORIDADE -----------------------------------------------------------------
 
 void task_setDynamicPrio(task_t* task, int prio) {
-    
-    //verifica os limites de prio
-    if(!task) {
+    if (!task)
         return;
-    }
+
+    // Limita prioridade dentro dos valores permitidos
+    if (prio > PRIO_MAX_TASK) prio = PRIO_MAX_TASK;
+    if (prio < PRIO_MIN_TASK) prio = PRIO_MIN_TASK;
+
+    task->prio_dynamic = prio;
 
     #ifdef DEBUG
-    //printf("\n set dynamic priority: -  priority: %d - task: %d\n", prio, task->id);
+    printf("[task_setDynamicPrio] Tarefa %d nova prioridade dinâmica: %d\n", task->id, task->prio_dynamic);
     #endif
-    
-    if(prio > PRIO_MAX_TASK)
-    prio = PRIO_MAX_TASK;
-    
-    if(prio < PRIO_MIN_TASK)
-    prio = PRIO_MIN_TASK;
-    
-    task->prio_dynamic = prio;
 }
 
-void task_setprio (task_t *task, int prio) {
+void task_setprio(task_t* task, int prio) {
+    if (prio > PRIO_MAX_TASK) prio = PRIO_MAX_TASK;
+    if (prio < PRIO_MIN_TASK) prio = PRIO_MIN_TASK;
 
-     //ajusta a prioridade 
-    if(prio > PRIO_MAX_TASK)
-        prio = PRIO_MAX_TASK;
-    
-    if(prio < PRIO_MIN_TASK)
-        prio = PRIO_MIN_TASK;
-
-    
-    if(!task) {
-        if(taskExec) {
-            taskExec->prio_static  = prio;
+    if (!task) {
+        if (taskExec) {
+            taskExec->prio_static = prio;
             taskExec->prio_dynamic = prio;
             #ifdef DEBUG
-            printf("\n task_setprio: -  priority: %d - dynamic: %d - task: %d\n", task->prio_static, task->prio_dynamic, task->id);
-            #endif   
+            printf("[task_setprio] Tarefa atual %d definida com prioridade estática %d\n", taskExec->id, prio);
+            #endif
         }
         return;
     }
 
-    task->prio_static  = prio;
+    task->prio_static = prio;
     task->prio_dynamic = prio;
 
     #ifdef DEBUG
-    printf("\n task_setprio: -  priority: %d - dynamic: %d - task: %d\n", task->prio_static, task->prio_dynamic, task->id);
+    printf("[task_setprio] Tarefa %d definida com prioridade estática %d\n", task->id, prio);
     #endif
 }
 
-// retorna a prioridade estática de uma tarefa (ou a tarefa atual)
-int task_getprio (task_t *task) {
-  if(!task && taskExec)
-        return taskExec->prio_static; 
-    if(task)
+int task_getprio(task_t* task) {
+    if (!task && taskExec)
+        return taskExec->prio_static;
+
+    if (task)
         return task->prio_static;
-    return 21;  
+
+    return 21; // valor padrão se não houver contexto
 }
 
+
+//------------------------------------------------------------ TEMPO E EXECUÇÃO -----------------------------------------------------------------
+
 unsigned int systime() {
-  return _systemTime;
+    return _systemTime;
 }
 
 int task_get_eet(task_t* task) {
-    if(!task)
+    if (!task)
         return 0;
+
     return task->running_time;
 }
 
 void task_set_eet(task_t* task, int eet) {
-    if(!task)
+    if (!task)
         return;
+
     task->running_time = eet;
+
+    #ifdef DEBUG
+    printf("[task_set_eet] Tarefa %d tempo de execução definido para %d\n", task->id, eet);
+    #endif
 }
 
-void handleTimer(int signum) {
-  
-    #ifdef DEBUG
-      //printf("\nhandleTimer: - [%d] Quantum: %d - Time: %d\n", taskExec->id, taskExec->quantum, _systemTime);
-    #endif
-    
-  taskExec->running_time++;
-  taskExec->quantum--;
-  _systemTime++;
 
-  if(taskExec == NULL)
-    return;
-  
-  if(taskExec->quantum <= 0) {
-    task_yield();
-    return;
-  }
+//------------------------------------------------------------ TRATADORES E TIMER -----------------------------------------------------------------
+
+void handleTimer(int signum) {
+    if (!taskExec)
+        return;
+
+    taskExec->running_time++;
+    taskExec->quantum--;
+    _systemTime++;
+
+    #ifdef DEBUG
+        printf("[handleTimer] Tarefa %d: Quantum %d | Tempo sistema: %d\n", 
+           taskExec->id, taskExec->quantum, _systemTime);
+    #endif
+
+    if (taskExec->quantum <= 0) {
+        taskExec->quantum = QUANTUM;
+        task_yield(); 
+    }
 }
 
 int initHandleTimer() {
-  
-  //define o tratador de interrupções do timer
-  action.sa_handler = handleTimer;
-  sigemptyset (&action.sa_mask);
-  action.sa_flags = 0;
-  
-  if(sigaction(SIGALRM, &action, 0) < 0) {
-    return -1;
-  }
+    action.sa_handler = handleTimer;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
 
-  return 0;
+    if (sigaction(SIGALRM, &action, 0) < 0) {
+        perror("Erro ao configurar tratador de sinal");
+        return -1;
+    }
+
+    return 0;
 }
 
 int initTimer() {
-   
-  //define um timer para a preempção por tempo
-   timer.it_value.tv_usec = 1000 ;       // primeiro disparo, em micro-segundos
-   timer.it_value.tv_sec  = 0 ;          // primeiro disparo, em segundos
-   timer.it_interval.tv_usec = 1000 ;   // disparos subsequentes, em micro-segundos
-   timer.it_interval.tv_sec  = 0 ;       // disparos subsequentes, em segundos
-   
-   if(setitimer(ITIMER_REAL, &timer, 0) < 0) {
-      return -1;
-   }
+    timer.it_value.tv_usec = 1000;
+    timer.it_value.tv_sec = 0;
+    timer.it_interval.tv_usec = 1000;
+    timer.it_interval.tv_sec = 0;
 
-   return 0;
+    if (setitimer(ITIMER_REAL, &timer, 0) < 0) {
+        perror("Erro ao iniciar timer");
+        return -1;
+    }
+
+    return 0;
 }
 
+
+//------------------------------------------------------------ INICIALIZAÇÃO DE TAREFAS -----------------------------------------------------------------
+
 void task_setProperties(task_t* task, int priority) {
+    if (!task) {
+        perror("task_setProperties: tarefa não pode ser NULL\n");
+        exit(1);
+    }
 
-  if(!task) {
-    perror("task_setProperties: task must no be a null\n");
-    exit(1);
-  }
+    task->state = PPOS_TASK_STATE_READY;
+    task->quantum = QUANTUM;
+    task->task_create_time = systime();
+    task->running_time = 0;
+    task->activations = 0;
+    task_setprio(task, priority);
 
-  task->state = PPOS_TASK_STATE_READY;
-  task->quantum = QUANTUM;
-  task->task_create_time = systime();
-  task->running_time = 0;
-  task->activations = 0;
-  task_setprio(task, priority);
+    #ifdef DEBUG
+    printf("[task_setProperties] Tarefa %d criada com prioridade %d\n", task->id, priority);
+    #endif
 }
