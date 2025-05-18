@@ -57,15 +57,15 @@ int main (int argc, char *argv[])
    task_setprio (&Ping, -4);
    sleep(rand() % 3);
 
-   task_create (&Pong, Body, "                Pong") ;
-   task_setprio (&Pong, -6);
+   task_create(&Pong, Body, "                Pong") ;
+   task_setprio(&Pong, -6);
    sleep(rand() % 3);
 
-   task_create (&Pung, Body, "                    Pung") ;
-   task_setprio (&Pung, -8);
+   task_create(&Pung, Body, "                    Pung") ;
+   task_setprio(&Pung, -8);
    sleep(rand() % 3);
 
-   task_yield () ;
+   task_yield() ;
    
    task_join(&Pang);
    task_join(&Peng);

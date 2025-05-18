@@ -17,7 +17,10 @@
 #define PRIO_MIN_TASK -20
 #define PRIO_MAX_TASK 20
 #define QUANTUM 20
-//#define DEBUG
+#define DEBUG
+
+#define DEFINE_PRIO(p) ((p < PRIO_MIN_TASK) ? PRIO_MIN_TASK : (p > PRIO_MAX_TASK) ? PRIO_MAX_TASK : p)
+
 
 unsigned int _systemTime = 0;
 
@@ -28,29 +31,28 @@ task_t* verifyPriority(task_t* current, task_t* highest);
 void task_setProperties(task_t* task, int priority);
 void task_setDynamicPrio(task_t* task, int prio);
 task_t* findByPriority(task_t* queue);
-void growAll(task_t* queue);
+void growAll(task_t* queue, task_t* exclude);
 int initHandleTimer();
+void print_queue(task_t* queue);
 void handleTimer(int signum);
 int initTimer();
 
 
 void before_ppos_init () {
+
     // put your customization here
     #ifdef DEBUG
         printf("\ninit - BEFORE");
     #endif
-
+        
     setvbuf (stdout, 0, _IONBF, 0);
 }
 
 void after_ppos_init () {
     // put your customization here
-#ifdef DEBUG
-    printf("\ninit - AFTER");
-#endif
-    _systemTime = 0;
-   
-    task_setProperties(taskMain, 20);
+    #ifdef DEBUG
+        printf("\ninit - AFTER");
+    #endif
     
     if(!taskMain) {
         perror("error initializing task main\n");
@@ -61,7 +63,7 @@ void after_ppos_init () {
         perror("ppos_init: error in setitimer");
         exit(1);
     }
-  
+    
     if(initHandleTimer()) {
         perror("ppos_init: error to define a handle timer");
         exit(1);
@@ -70,9 +72,9 @@ void after_ppos_init () {
 
 void before_task_create (task_t *task ) {
     // put your customization here
-    #ifdef DEBUG
+#ifdef DEBUG
     printf("\ntask_create - BEFORE - [%d]", task->id);
-    #endif
+#endif
 }
 
 void after_task_create (task_t *task ) {
@@ -80,7 +82,7 @@ void after_task_create (task_t *task ) {
 #ifdef DEBUG
     printf("\ntask_create - AFTER - [%d]", task->id);
 #endif
-    task_setProperties(task, 0);
+    
 }
 
 void before_task_exit () {
@@ -92,25 +94,30 @@ void before_task_exit () {
 
 void after_task_exit () {
     // put your customization here
-#ifdef DEBUG
-    printf("\ntask_exit - AFTER- [%d]", taskExec->id);
-#endif
-    
+    #ifdef DEBUG
+        printf("\ntask_exit - AFTER- [%d]", taskExec->id);
+    #endif
+    taskExec->task_death_time = systime();
+    printf("Task %d exit: execution time %d ms, processor time %d ms, %d activations\n", taskExec->id, 
+                                                                                     (taskExec->task_death_time - taskExec->task_create_time),
+                                                                                     taskExec->running_time,
+                                                                                     taskExec->activations);
 }
 
 void before_task_switch ( task_t *task ) {
     // put your customization here
-#ifdef DEBUG
-    printf("\ntask_switch - BEFORE - [%d -> %d]", taskExec->id, task->id);
-#endif
-    
+    #ifdef DEBUG
+        printf("\ntask_switch - BEFORE - [%d -> %d]", taskExec->id, task->id);
+    #endif
 }
 
 void after_task_switch ( task_t *task ) {
     // put your customization here
-#ifdef DEBUG
-    printf("\ntask_switch - AFTER - [%d -> %d]", taskExec->id, task->id);
-#endif
+    #ifdef DEBUG
+        printf("\ntask_switch - AFTER - [%d -> %d]\n", taskExec->id, task->id);
+    #endif
+
+    taskExec->id != 1 ? taskExec->activations++ : 0;
 }
 
 void before_task_yield () {
@@ -121,9 +128,9 @@ void before_task_yield () {
 }
 void after_task_yield () {
     // put your customization here
-#ifdef DEBUG
-    printf("\ntask_yield - AFTER - [%d]", taskExec->id);
-#endif
+    #ifdef DEBUG
+        printf("\ntask_yield - AFTER - [%d]", taskExec->id);
+    #endif
 }
 
 
@@ -446,22 +453,20 @@ int after_mqueue_msgs (mqueue_t *queue) {
 
 task_t* scheduler() {
     // Encontra a task com maior prioridade
+    
     task_t* selected_task = findByPriority(readyQueue);
     
     if (!selected_task)
-        return NULL;
+    return NULL;
 
     #ifdef DEBUG
     printf("\n[scheduler] Selecionada tarefa %d com prioridade dinâmica %d\n", 
-           selected_task->id, selected_task->prio_dynamic);
+        selected_task->id, selected_task->prio_dynamic);
     #endif
 
     // Envelhece todas as tarefas (exceto a selecionada)
-    growAll(readyQueue);
-
-    // Restaura a prioridade dinâmica da tarefa selecionada
-    task_setDynamicPrio(selected_task, selected_task->prio_static);
-
+    growAll(readyQueue, selected_task);
+ 
     return selected_task;
 }
 
@@ -480,6 +485,7 @@ task_t* findByPriority(task_t* queue) {
         best = verifyPriority(current, best);
         current = current->next;
     } while (current != queue);
+    
 
     return best;
 }
@@ -503,23 +509,28 @@ task_t* verifyPriority(task_t* current, task_t* best) {
     return best;
 }
 
-void growAll(task_t* queue) {
+void growAll(task_t* queue, task_t* exclude) {
     if (!queue)
         return;
 
     task_t* current = queue;
 
     do {
-        // Evita envelhecer a task que será executada (ela ainda não foi retirada da fila)
-        if (current != taskExec) {
+        if (current != exclude) {
             task_setDynamicPrio(current, current->prio_dynamic + GROWTH_FACTOR);
             #ifdef DEBUG
             printf("[growAll] Tarefa %d envelheceu para prioridade %d\n", current->id, current->prio_dynamic);
+            #endif
+        } else {
+            task_setDynamicPrio(current, current->prio_static);
+            #ifdef DEBUG
+            printf("[growAll] Tarefa %d restaurada para prioridade %d\n", current->id, current->prio_dynamic);
             #endif
         }
         current = current->next;
     } while (current != queue);
 }
+
 
 
 //------------------------------------------------------------ PRIORIDADE -----------------------------------------------------------------
@@ -529,26 +540,23 @@ void task_setDynamicPrio(task_t* task, int prio) {
         return;
 
     // Limita prioridade dentro dos valores permitidos
-    if (prio > PRIO_MAX_TASK) prio = PRIO_MAX_TASK;
-    if (prio < PRIO_MIN_TASK) prio = PRIO_MIN_TASK;
-
-    task->prio_dynamic = prio;
+    task->prio_dynamic = DEFINE_PRIO(prio);
 
     #ifdef DEBUG
-    printf("[task_setDynamicPrio] Tarefa %d nova prioridade dinâmica: %d\n", task->id, task->prio_dynamic);
+    printf("\n[task_setDynamicPrio] Tarefa %d nova prioridade dinâmica: %d\n", task->id, task->prio_dynamic);
     #endif
 }
 
 void task_setprio(task_t* task, int prio) {
-    if (prio > PRIO_MAX_TASK) prio = PRIO_MAX_TASK;
-    if (prio < PRIO_MIN_TASK) prio = PRIO_MIN_TASK;
+    
+    prio = DEFINE_PRIO(prio);
 
     if (!task) {
         if (taskExec) {
             taskExec->prio_static = prio;
             taskExec->prio_dynamic = prio;
             #ifdef DEBUG
-            printf("[task_setprio] Tarefa atual %d definida com prioridade estática %d\n", taskExec->id, prio);
+            printf("\n[task_setprio] Tarefa atual %d definida com prioridade estática %d\n", taskExec->id, prio);
             #endif
         }
         return;
@@ -558,7 +566,7 @@ void task_setprio(task_t* task, int prio) {
     task->prio_dynamic = prio;
 
     #ifdef DEBUG
-    printf("[task_setprio] Tarefa %d definida com prioridade estática %d\n", task->id, prio);
+    printf("\n[task_setprio] Tarefa %d definida com prioridade estática %d\n", task->id, prio);
     #endif
 }
 
@@ -593,7 +601,7 @@ void task_set_eet(task_t* task, int eet) {
     task->running_time = eet;
 
     #ifdef DEBUG
-    printf("[task_set_eet] Tarefa %d tempo de execução definido para %d\n", task->id, eet);
+    printf("\n[task_set_eet] Tarefa %d tempo de execução definido para %d\n", task->id, eet);
     #endif
 }
 
@@ -601,23 +609,41 @@ void task_set_eet(task_t* task, int eet) {
 //------------------------------------------------------------ TRATADORES E TIMER -----------------------------------------------------------------
 
 void handleTimer(int signum) {
-    if (!taskExec)
+    // Verifica se a tarefa atual está definida
+    if (!taskExec) {
+        fprintf(stderr, "handleTimer: taskExec não pode ser NULL\n");
         return;
+    }
 
+    // Atualiza tempos
     taskExec->running_time++;
-    taskExec->quantum--;
     _systemTime++;
 
-    #ifdef DEBUG
-        printf("[handleTimer] Tarefa %d: Quantum %d | Tempo sistema: %d\n", 
-           taskExec->id, taskExec->quantum, _systemTime);
-    #endif
-
-    if (taskExec->quantum <= 0) {
-        taskExec->quantum = QUANTUM;
-        task_yield(); 
+    // Evita preempção do dispatcher (tarefa id == 1)
+    if (taskExec->id == 1) {
+        return;
     }
+
+    // Decrementa quantum da tarefa
+    taskExec->quantum--;
+
+    // Se quantum acabou, devolve o processador
+    if (taskExec->quantum < 1) {
+        taskExec->quantum = QUANTUM;
+        #ifdef DEBUG
+            printf("[handleTimer] Tarefa %d atingiu fim do quantum. Chamando task_yield().\n", taskExec->id);
+        #endif
+        task_yield();
+        return;
+    }
+
+    // Mensagem de depuração, se ativada
+    #ifdef DEBUG
+        printf("[handleTimer] Tarefa %d: Quantum restante: %d | Tempo do sistema: %d\n", 
+               taskExec->id, taskExec->quantum, _systemTime);
+    #endif
 }
+
 
 int initHandleTimer() {
     action.sa_handler = handleTimer;
@@ -655,14 +681,32 @@ void task_setProperties(task_t* task, int priority) {
         exit(1);
     }
 
-    task->state = PPOS_TASK_STATE_READY;
     task->quantum = QUANTUM;
     task->task_create_time = systime();
+    task->task_death_time = 0;
     task->running_time = 0;
     task->activations = 0;
     task_setprio(task, priority);
 
     #ifdef DEBUG
-    printf("[task_setProperties] Tarefa %d criada com prioridade %d\n", task->id, priority);
+    printf("\n[task_setProperties] Tarefa %d criada com prioridade %d\n", task->id, priority);
     #endif
+}
+
+void print_queue(task_t* queue) {
+    if (!queue) {
+        perror("print_queue: fila não pode ser NULL\n");
+        return;
+    }
+
+    task_t* current = queue;
+
+    do {
+        printf("\n[print_tcb] Tarefa %d: ", current->id);
+        printf("Estado: %c | Prioridade: %d | Tempo de execução: %d | Tempo de criação: %d | Tempo de morte: %d | Quantum: %d | Ativações: %d\n", 
+               current->state, current->prio_static, current->running_time, current->task_create_time, current->task_death_time, current->quantum, current->activations);
+        current = current->next;
+    } while (current != queue);
+
+    printf("\n");
 }
