@@ -17,7 +17,11 @@
 #define PRIO_MIN_TASK -20
 #define PRIO_MAX_TASK 20
 #define QUANTUM 20
-#define DEBUG
+//#define DEBUG
+
+int activationDispatcher = 0;
+int createDispatcher = 0;
+int deathDispatcher = 0;
 
 #define DEFINE_PRIO(p) ((p < PRIO_MIN_TASK) ? PRIO_MIN_TASK : (p > PRIO_MAX_TASK) ? PRIO_MAX_TASK : p)
 
@@ -58,7 +62,7 @@ void after_ppos_init () {
         perror("error initializing task main\n");
         exit(1);
     }
-
+    
     if(initTimer()) {
         perror("ppos_init: error in setitimer");
         exit(1);
@@ -79,17 +83,37 @@ void before_task_create (task_t *task ) {
 
 void after_task_create (task_t *task ) {
     // put your customization here
-#ifdef DEBUG
-    printf("\ntask_create - AFTER - [%d]", task->id);
-#endif
+    #ifdef DEBUG
+        printf("\ntask_create - AFTER - [%d]", task->id);
+    #endif
+    task->task_create_time = systime();
+    task->task_death_time = 0;
+    task->running_time = 0;
+    task->activations = 0;
+    task->prio_static = 0;
+    task->prio_dynamic = 0;
+    if(task->id != 1) 
+        task->quantum = QUANTUM;
     
 }
 
 void before_task_exit () {
     // put your customization here
-#ifdef DEBUG
-    printf("\ntask_exit - BEFORE - [%d]", taskExec->id);
-#endif
+    #ifdef DEBUG
+        printf("\ntask_exit - BEFORE - [%d]", taskExec->id);
+    #endif
+    if(taskExec->id != 1) {
+        taskExec->task_death_time = systime();
+        printf("Task %d exit: execution time %d ms, processor time %d ms, %d activations\n", taskExec->id, 
+            (taskExec->task_death_time - taskExec->task_create_time),
+                                                                                     taskExec->running_time,
+                                                                                     taskExec->activations);
+    } else {
+        printf("Task 1 exit: execution time %d ms, processor time %d ms, %d activations\n",  
+            (systime() - createDispatcher),
+                                                                                     taskExec->running_time,
+                                                                                     activationDispatcher);
+    }
 }
 
 void after_task_exit () {
@@ -97,11 +121,6 @@ void after_task_exit () {
     #ifdef DEBUG
         printf("\ntask_exit - AFTER- [%d]", taskExec->id);
     #endif
-    taskExec->task_death_time = systime();
-    printf("Task %d exit: execution time %d ms, processor time %d ms, %d activations\n", taskExec->id, 
-                                                                                     (taskExec->task_death_time - taskExec->task_create_time),
-                                                                                     taskExec->running_time,
-                                                                                     taskExec->activations);
 }
 
 void before_task_switch ( task_t *task ) {
@@ -114,10 +133,11 @@ void before_task_switch ( task_t *task ) {
 void after_task_switch ( task_t *task ) {
     // put your customization here
     #ifdef DEBUG
-        printf("\ntask_switch - AFTER - [%d -> %d]\n", taskExec->id, task->id);
+    printf("\ntask_switch - AFTER - [%d -> %d]\n", taskExec->id, task->id);
+    printf("activations: %d id: %d\n", taskExec->activations, taskExec->id);
     #endif
-
-    taskExec->id != 1 ? taskExec->activations++ : 0;
+    
+    taskExec->id != 1 ? taskExec->activations++ : activationDispatcher++;  
 }
 
 void before_task_yield () {
@@ -577,7 +597,7 @@ int task_getprio(task_t* task) {
     if (task)
         return task->prio_static;
 
-    return 21; // valor padrão se não houver contexto
+    return 21; // valor caso não houver contexto
 }
 
 
