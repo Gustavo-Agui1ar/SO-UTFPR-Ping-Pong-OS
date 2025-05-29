@@ -19,6 +19,10 @@
 #define QUANTUM 20
 //#define DEBUG
 
+int activationDispatcher = 0;
+int createDispatcher = 0;
+int deathDispatcher = 0;
+
 #define DEFINE_PRIO(p) ((p < PRIO_MIN_TASK) ? PRIO_MIN_TASK : (p > PRIO_MAX_TASK) ? PRIO_MAX_TASK : p)
 
 
@@ -86,6 +90,11 @@ void after_task_create (task_t *task ) {
     task->task_death_time = 0;
     task->running_time = 0;
     task->activations = 0;
+    task->prio_static = 0;
+    task->prio_dynamic = 0;
+    if(task->id != 1) 
+        task->quantum = QUANTUM;
+    
 }
 
 void before_task_exit () {
@@ -99,6 +108,11 @@ void before_task_exit () {
             (taskExec->task_death_time - taskExec->task_create_time),
                                                                                      taskExec->running_time,
                                                                                      taskExec->activations);
+    } else {
+        printf("Task 1 exit: execution time %d ms, processor time %d ms, %d activations\n",  
+            (systime() - createDispatcher),
+                                                                                     taskExec->running_time,
+                                                                                     activationDispatcher);
     }
 }
 
@@ -119,9 +133,11 @@ void before_task_switch ( task_t *task ) {
 void after_task_switch ( task_t *task ) {
     // put your customization here
     #ifdef DEBUG
-        printf("\ntask_switch - AFTER - [%d -> %d]\n", taskExec->id, task->id);
+    printf("\ntask_switch - AFTER - [%d -> %d]\n", taskExec->id, task->id);
+    printf("activations: %d id: %d\n", taskExec->activations, taskExec->id);
     #endif
-    taskExec->id != 1 ? taskExec->activations++ : 0;
+    
+    taskExec->id != 1 ? taskExec->activations++ : activationDispatcher++;  
 }
 
 void before_task_yield () {
