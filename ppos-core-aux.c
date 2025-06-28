@@ -93,7 +93,6 @@ void after_task_create (task_t *task ) {
     task->prio_dynamic = 0;
     if(task->id != 1) 
         task->quantum = QUANTUM;
-    
 }
 
 void before_task_exit () {
@@ -172,6 +171,7 @@ void before_task_resume(task_t *task) {
 #ifdef DEBUG
     printf("\ntask_resume - BEFORE - [%d]", task->id);
 #endif
+
 }
 
 void after_task_resume(task_t *task) {
