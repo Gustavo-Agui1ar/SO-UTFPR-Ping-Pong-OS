@@ -1,9 +1,9 @@
 # Compilador
 CC = gcc
-CFLAGS = -Wall -g -lrt
+CFLAGS = -Wall -g
 
 # Arquivos-fonte
-OBJS = pingpong-disco1.o disk-driver.o ppos_disk.o ppos-core-aux.o ppos-all.o  queue.o 
+OBJS = pingpong-disco1.o ppos-disk-manager.o ppos-core-aux.o ppos-all.o  queue.o -lrt - Wall
 
 # Executável final
 TARGET = test-disk-porra
