@@ -1,6 +1,5 @@
 #include "ppos.h"
 #include "ppos-core-globals.h"
-#include "ppos-disk-manager.h"
 #include <signal.h>
 #include <string.h>
 #include <sys/time.h>
@@ -523,9 +522,6 @@ task_t* verifyPriority(task_t* current, task_t* best) {
     if (current->prio_static > best->prio_static)
         return best;
 
-    if (current->id < best->id)
-        return current;
-
     return best;
 }
 
@@ -539,12 +535,12 @@ void growAll(task_t* queue, task_t* exclude) {
         if (current != exclude) {
             task_setDynamicPrio(current, current->prio_dynamic + GROWTH_FACTOR);
             #ifdef DEBUG
-            printf("[growAll] Tarefa %d envelheceu para prioridade %d\n", current->id, current->prio_dynamic);
+                printf("[growAll] Tarefa %d envelheceu para prioridade %d\n", current->id, current->prio_dynamic);
             #endif
         } else {
             task_setDynamicPrio(current, current->prio_static);
             #ifdef DEBUG
-            printf("[growAll] Tarefa %d restaurada para prioridade %d\n", current->id, current->prio_dynamic);
+                printf("[growAll] Tarefa %d restaurada para prioridade %d\n", current->id, current->prio_dynamic);
             #endif
         }
         current = current->next;
