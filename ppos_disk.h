@@ -26,7 +26,7 @@ int disk_block_write(int block, void *buffer);
 
 disk_t* FCFS();
 disk_t* SSTF();
-disk_t* CSCAN(int block);
+disk_t* CSCAN();
 
 void handler_signal_disk( int signum);
 void disk_manager();

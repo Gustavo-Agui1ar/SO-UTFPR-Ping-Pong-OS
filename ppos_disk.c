@@ -1,285 +1,217 @@
 #include "ppos_disk.h"
-#include <stdio.h> // <-- para printf
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
 
 #define DEBUG
 
-mutex_t* mutex_disk = NULL;
-task_t* disk_mgr = NULL;
-disk_t* last_request = NULL;
-disk_t* queue_disk = NULL;
-struct sigaction disk_action;
+semaphore_t *semaphore_disk = NULL;
+task_t *disk_mgr = NULL;
+disk_t *last_request = NULL;
+disk_t *queue_disk = NULL;
 int disk_awake = 0;
 int lastBlock = 0;
 
+disk_t *(*select_request)(void) = NULL;
+void print_task_queue(const char *name, queue_t *queue);
+
 int disk_mgr_init(int *numBlocks, int *blockSize) {
     #ifdef DEBUG
-        printf("[DEBUG] Iniciando disk_mgr_init\n");
+    printf("[DEBUG] Iniciando disk_mgr_init\n");
     #endif
 
-    if(disk_cmd(DISK_CMD_INIT, 0, 0) < 0) {
+    if (disk_cmd(DISK_CMD_INIT, 0, 0) < 0) {
         #ifdef DEBUG
-            printf("[ERRO] disk_cmd INIT falhou\n");
-        #endif
-        return -1; 
-    }
-
-    if(disk_cmd(DISK_CMD_STATUS, 0, 0) == 0) {
-        #ifdef DEBUG
-            printf("[ERRO] disco não está pronto\n");
+        printf("[ERRO] disk_cmd INIT falhou\n");
         #endif
         return -1;
     }
 
-    if(!mutex_create(mutex_disk)) {
+    if(!sem_create(semaphore_disk, 1)) {
         #ifdef DEBUG
-            printf("[ERRO] sem_create falhou\n");
+        printf("[ERRO] sem_create falhou\n");
         #endif
         return -1;
     }
 
-    #ifdef DEBUG
-        printf("[DEBUG] Criando tarefa do gerenciador de disco\n");
-    #endif
-    disk_mgr = (task_t*)malloc(sizeof(task_t));
-    
-    if(disk_mgr == NULL) {
+    disk_mgr = malloc(sizeof(task_t));
+    if (!disk_mgr) return -1;
+    if (task_create(disk_mgr, disk_manager, NULL) < 0) {
         #ifdef DEBUG
-            printf("[DEBUG] Erro: Disk_mgr foi inicializado incorretamente!\n");
-        #endif
-        return -1;
-    }
-    
-   if (task_create(disk_mgr, disk_manager, NULL) < 0) {
-        #ifdef DEBUG
-            printf("[DEBUG] Erro: task_create falhou!\n");
+        printf("[ERRO] disk_mgr falhou\n");
         #endif
         free(disk_mgr);
         disk_mgr = NULL;
         return -1;
     }
-    
-    disk_action.sa_handler = handler_signal_disk;
-    sigemptyset(&disk_action.sa_mask);
-    disk_action.sa_flags = 0;
 
-    if (sigaction(SIGUSR1, &disk_action, 0) < 0) {
+    struct sigaction action;
+    action.sa_handler = handler_signal_disk;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    if (sigaction(SIGUSR1, &action, NULL) < 0) {
+        #ifdef DEBUG
         perror("[ERRO] sigaction");
+        #endif
         return -1;
     }
 
     *numBlocks = disk_cmd(DISK_CMD_DISKSIZE, 0, 0);
-    if (*numBlocks <= 0) {
-        #ifdef DEBUG
-            printf("[ERRO] disk_cmd DISK_CMD_DISKSIZE falhou\n");
-        #endif
-        return -1;
-    }
+    if (*numBlocks <= 0) return -1;
     *blockSize = disk_cmd(DISK_CMD_BLOCKSIZE, 0, 0);
-    if (*blockSize <= 0) {
-        #ifdef DEBUG
-            printf("[ERRO] disk_cmd DISK_CMD_BLOCKSIZE falhou\n");
-        #endif
-        return -1;
-    }
+    if (*blockSize <= 0) return -1;
 
+    select_request = FCFS;
     #ifdef DEBUG
-        printf("[DEBUG] disk_mgr_init finalizado com sucesso\n");
+    printf("[DEBUG] disk_mgr_init finalizado com sucesso\n");
     #endif
     return 0;
 }
 
-disk_t* FCFS() {
-    #ifdef DEBUG
-        printf("[DEBUG] Executando FCFS\n");
-    #endif
-
-    if(queue_disk == NULL)
-        return NULL;
-
-    lastBlock = queue_disk->block;
-
-    #ifdef DEBUG
-        printf("[DEBUG] FCFS selecionou bloco %d\n", queue_disk->block);
-    #endif
-    return queue_disk;   
+disk_t *FCFS(void) {
+    return queue_disk;
 }
 
-disk_t* SSTF() {
-    #ifdef DEBUG
-        printf("[DEBUG] Executando SSTF\n");
-    #endif
-
-    if(queue_disk == NULL)
-        return NULL;
-
-    disk_t* current = queue_disk;
-    disk_t* best = current;
-
+disk_t *SSTF(void) {
+    if (!queue_disk) return NULL;
+    disk_t *current = queue_disk;
+    disk_t *best = current;
     do {
-        if(abs(lastBlock - current->block) < abs(lastBlock - best->block))
+        if (abs(lastBlock - current->block) < abs(lastBlock - best->block))
             best = current;
-        current = queue_disk->next; 
+        current = current->next;
     } while (current != queue_disk);
-
-    lastBlock = best->block;
-    #ifdef DEBUG
-        printf("[DEBUG] SSTF selecionou bloco %d\n", best->block);
-    #endif
     return best;
 }
 
-disk_t* CSCAN(int lastBlock) {
-    #ifdef DEBUG
-        printf("[DEBUG] Executando CSCAN\n");
-    #endif
-
-    if(queue_disk == NULL)
-        return NULL;
-
-    disk_t* current = queue_disk;
-    disk_t* best = current;
-
-    do {
-        current = queue_disk->next; 
-    } while (current != queue_disk);
-
-    #ifdef DEBUG
-        printf("[DEBUG] CSCAN selecionou bloco %d\n", best->block);
-    #endif
-    lastBlock = best->block;
-    return best;
+disk_t *CSCAN(void) {
+    return NULL;
 }
 
-int disk_block_read (int block, void *buffer) {
-    #ifdef DEBUG
-        printf("[DEBUG] Requisição de leitura do bloco %d\n", block);
-    #endif
-    mutex_lock(mutex_disk);    
-    
-    disk_t* disk_config = NULL;
-    disk_config = (disk_t*)malloc(sizeof(disk_t));
-    
-    if(disk_config == NULL) {
-        #ifdef DEBUG
-            printf("[DEBUG] Erro: disk_config mal inicializado!\n");
-        #endif
+int disk_block_write(int block, void *buffer) {
+    if (block < 0) return -1;
 
-        mutex_unlock(mutex_disk);
-        return -1;
-    }
-    
-    disk_config->next = disk_config->prev = NULL;
-    disk_config->operation = DISK_CMD_READ;
-    disk_config->buffer = buffer;
-    disk_config->block = block;
-    disk_config->task = taskExec;
-    
-    queue_append((queue_t**)&queue_disk, (queue_t*)disk_config);
-    
-    if (disk_awake) {
-        #ifdef DEBUG
-            printf("[DEBUG] Tarefa do disco já está na fila. Reativando.\n");
-        #endif
-        task_resume(disk_mgr);
-    }
+    disk_t *req = malloc(sizeof(disk_t));
+    if (!req) return -1;
+    req->operation = DISK_CMD_WRITE;
+    req->block = block;
+    req->buffer = buffer;
+    req->task = taskExec;
 
-    #ifdef DEBUG
-    printf("[DEBUG] Tarefa do usuário será suspensa após leitura\n");
-    #endif
-    
+    sem_down(semaphore_disk);
+    queue_append((queue_t **)&queue_disk, (queue_t *)req);
+    sem_up(semaphore_disk);
+
+    if (!disk_awake) task_resume(disk_mgr);
+
     task_suspend(taskExec, &sleepQueue);
-    mutex_unlock(mutex_disk);
-    
     return 0;
 }
-    
-int disk_block_write (int block, void *buffer) {
-        #ifdef DEBUG
-        printf("[DEBUG] Requisição de escrita no bloco %d\n", block);
-    #endif
-    mutex_lock(mutex_disk);    
-    
-    disk_t* disk_config = NULL;
-    disk_config = (disk_t*)malloc(sizeof(disk_t));
-    
-    if(disk_config == NULL) {
-        #ifdef DEBUG
-        printf("[DEBUG] Erro: disk_config mal inicializado!\n");
-        #endif
-        mutex_unlock(mutex_disk);
-        return -1;
-    }
 
-    disk_config->next = disk_config->prev = NULL;
-    disk_config->operation = DISK_CMD_WRITE;
-    disk_config->buffer = buffer;
-    disk_config->block = block;
-    disk_config->task = taskExec;
+int disk_block_read(int block, void *buffer) {
+    if (block < 0) return -1;
 
-    queue_append((queue_t**)&queue_disk, (queue_t*)disk_config);
+    disk_t *req = malloc(sizeof(disk_t));
+    if (!req) return -1;
+    req->operation = DISK_CMD_READ;
+    req->block = block;
+    req->buffer = buffer;
+    req->task = taskExec;
 
-    if (disk_awake) {
-        #ifdef DEBUG
-            printf("[DEBUG] Tarefa do disco já está na fila. Reativando.\n");
-        #endif
-        task_resume(disk_mgr);
-    }
+    sem_down(semaphore_disk);
+    queue_append((queue_t **)&queue_disk, (queue_t *)req);
+    sem_up(semaphore_disk);
 
-    #ifdef DEBUG
-    printf("[DEBUG] Tarefa do usuário será suspensa após escrita\n");
-    #endif
+    if (!disk_awake) task_resume(disk_mgr);
+
     task_suspend(taskExec, &sleepQueue);
-    mutex_unlock(mutex_disk);
-
     return 0;
 }
 
 void disk_manager() {
+
     #ifdef DEBUG
-        printf("[DEBUG] Iniciando disk_manager\n");
+    printf("[DEBUG] disk_manager: Iniciado \n");
     #endif
 
-    while(1) {
-        mutex_lock(mutex_disk);
+    while (1) {
+        sem_down(semaphore_disk);
 
-        if(disk_awake) {
+        #ifdef DEBUG
+        printf("[DEBUG] disk_manager: sem_down realizado\n");
+        #endif
+
+        if (disk_awake) {
             disk_awake = 0;
-            if(last_request) {
+
+            #ifdef DEBUG
+            printf("[DEBUG] disk_manager: disco acordou, retomando tarefa %p\n", last_request ? last_request->task : NULL);
+            #endif
+
+            if (last_request) {
                 task_resume(last_request->task);
-                free(last_request);
-                last_request = NULL;
             }
         }
 
-        if((disk_cmd(DISK_CMD_STATUS, 0, 0) == DISK_STATUS_IDLE) && (queue_size((queue_t*)queue_disk) > 0)){
+        // Se o disco está ocioso e há requisições pendentes
+        if (disk_cmd(DISK_CMD_STATUS, 0, 0) == DISK_STATUS_IDLE && queue_disk) {
+            disk_t *next = select_request();
+
             #ifdef DEBUG
-            printf("[DEBUG] Disco está livre, buscando próxima requisição\n");
+            printf("[DEBUG] disk_manager: disco ocioso e há requisições na fila\n");
             #endif
-            last_request = FCFS();
-            if (last_request) {
-                queue_remove((queue_t**)(&queue_disk), (queue_t*)last_request);
+
+            if (next) {
                 #ifdef DEBUG
-                    printf("[DEBUG] Enviando comando ao disco: op=%d bloco=%d buffer=%p\n",
-                        last_request->operation, last_request->block, last_request->buffer);
+                printf("[DEBUG] disk_manager: requisicao selecionada (op=%d, bloco=%d)\n", next->operation, next->block);
                 #endif
-                disk_cmd(last_request->operation, last_request->block, last_request->buffer);
+
+                queue_remove((queue_t **)&queue_disk, (queue_t *)next);
+                lastBlock = next->block;
+                last_request = next;
+                disk_cmd(next->operation, next->block, next->buffer);
+
+                #ifdef DEBUG
+                printf("[DEBUG] disk_manager: comando enviado ao disco (op=%d, bloco=%d)\n", next->operation, next->block);
+                #endif
             }
         }
-        
-        mutex_unlock(mutex_disk);
+
+        #ifdef DEBUG
+        print_task_queue("[DEBUG] Fila de tarefas suspensas antes de task_suspend", (queue_t *)sleepQueue);
+        #endif
+
+        // Libera o semáforo e suspende o gerenciador
+        sem_up(semaphore_disk);
+
+        #ifdef DEBUG
+        printf("[DEBUG] disk_manager: sem_up realizado, suspendendo tarefa do gerenciador\n");
+        #endif
+
         task_suspend(disk_mgr, &sleepQueue);
     }
 }
 
-void handler_signal_disk(int signum) {
-    #ifdef DEBUG
-        printf("[DEBUG] Sinal recebido: %d\n", signum);
-    #endif
 
-    if(signum == SIGUSR1) {
-        mutex_lock(mutex_disk);
-        disk_awake = 1;
-        task_resume(disk_mgr);
-        mutex_unlock(mutex_disk);
+void handler_signal_disk(int signum) {
+    if (signum != SIGUSR1) return;
+    sem_down(semaphore_disk);
+    disk_awake = 1;
+    task_resume(disk_mgr);
+    sem_up(semaphore_disk);
+}
+
+void print_task_queue(const char *name, queue_t *queue) {
+    printf("[DEBUG] %s: ", name);
+    if (!queue) {
+        printf("<vazia>\n");
+        return;
     }
+    queue_t *curr = queue;
+    do {
+        task_t *t = (task_t*) curr;
+        printf("%d -> ", t->id);
+        curr = curr->next;
+    } while (curr != queue);
+    printf("(retorno)\n");
 }
