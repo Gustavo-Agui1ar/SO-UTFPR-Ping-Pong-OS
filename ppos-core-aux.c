@@ -16,7 +16,7 @@
 #define PRIO_MIN_TASK -20
 #define PRIO_MAX_TASK 20
 #define QUANTUM 20
-#define DEBUG
+//#define DEBUG
 
 int activationDispatcher = 0;
 int createDispatcher = 0;

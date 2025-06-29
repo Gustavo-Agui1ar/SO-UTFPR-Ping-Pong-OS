@@ -3,10 +3,15 @@
 #include <stdlib.h>
 #include <signal.h>
 
-#define DEBUG
+//#define DEBUG
 disk_t* disk = NULL;
+task_t* ajust = NULL;
 task_t* taskDiskMgr = NULL;
 struct sigaction sigDisk;
+
+void ajuste() {
+    while(1){task_yield();}
+}
 
 int disk_mgr_init(int *numBlocks, int *blockSize) {
 
@@ -59,7 +64,7 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
         printf("\nDisk size: %d blocks, Block size: %d bytes\n", disk->numBlocks, disk->blockSize);
     #endif
 
-    if(sem_create(&disk->sem_disk, 1) < 0) {
+    if(sem_create(&disk->sem_disk, 0) < 0) {
         perror("Failed to create disk semaphore");
         free(disk);
         return -1;
@@ -104,6 +109,27 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
         return -1;
     } 
     
+    task_t* ajust = (task_t*)malloc(sizeof(task_t));
+
+    if (!ajust) {
+        perror("Failed to allocate memory for ajust disk manager task");
+        sem_destroy(&disk->sem_disk);
+        sem_destroy(&disk->sem_queue);
+        free(disk);
+        free(taskDiskMgr);
+        return -1;
+    }
+
+    if(task_create(ajust, ajuste, NULL) < 0) {
+        perror("Failed to create ajust disk manager task");
+        sem_destroy(&disk->sem_disk);
+        sem_destroy(&disk->sem_queue);
+        free(disk);
+        free(taskDiskMgr);
+        free(ajust);
+        return -1;
+    }
+
     sigDisk.sa_handler = handler_signal_disk;
     sigemptyset(&sigDisk.sa_mask);
     sigDisk.sa_flags = 0;
@@ -122,23 +148,19 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
 
 int disk_block_write(int block, void *buffer) {
 
-    if(block < 0 || block >= disk->numBlocks) {
-        perror("Invalid block number for write operation");
+    if (!disk || block < 0 || block >= disk->numBlocks) {
+        perror("Invalid disk or block number");
         return -1;
     }
 
-    if(disk == NULL) {
-        perror("Disk manager not initialized");
-        return -1;
-    }
 
     #ifdef DEBUG
         printf("\nInitiating write operation for block %d\n", block);
     #endif
 
-    sem_down(&disk->sem_disk);
+    sem_down(&disk->sem_queue);
 
-    #ifndef DEBUG
+    #ifdef DEBUG
         printf("\nGetting disk semaphore for write operation...\n");
     #endif
 
@@ -159,42 +181,30 @@ int disk_block_write(int block, void *buffer) {
         printf("\nDisk request created for write operation on block %d\n", block);
     #endif
 
-    sem_down(&disk->sem_queue);
-    
     queue_append((queue_t**)&disk->requestQueue, (queue_t*)request);
 
     sem_up(&disk->sem_queue);
-
+    
     #ifdef DEBUG
-        printf("\nDisk request appended to request queue\n");
+    printf("\nDisk request appended to request queue\n");
     #endif
-
-    if(disk->signal == 0 && disk->empty == 1) {
-        task_resume(taskDiskMgr);
-    } 
-
+    
     #ifdef DEBUG
-        printf("\nDisk manager task resumed for write operation\n");
+    printf("\nDisk manager task resumed for write operation\n");
     #endif
-
+    
     sem_up(&disk->sem_disk);
 
-    sem_down(&disk->sem_queue);
-    task_suspend(taskExec, &disk->taskQueue);
-    sem_up(&disk->sem_queue);    task_yield();
+    task_suspend(taskExec, NULL);
+    task_yield();
     
     return 0;
 }
 
 int disk_block_read(int block, void *buffer) {
 
-    if(block < 0 || block >= disk->numBlocks) {
-        perror("Invalid block number for read operation");
-        return -1;
-    }
-
-    if(disk == NULL) {
-        perror("Disk manager not initialized");
+   if (!disk || block < 0 || block >= disk->numBlocks) {
+        perror("Invalid disk or block number");
         return -1;
     }
 
@@ -202,9 +212,9 @@ int disk_block_read(int block, void *buffer) {
         printf("\nInitiating read operation for block %d\n", block);
     #endif
 
-    sem_down(&disk->sem_disk);
+    sem_down(&disk->sem_queue);
 
-    #ifndef DEBUG
+    #ifdef DEBUG
         printf("\nGetting disk semaphore for read operation...\n");
     #endif
 
@@ -225,8 +235,6 @@ int disk_block_read(int block, void *buffer) {
         printf("\nDisk request created for read operation on block %d\n", block);
     #endif
 
-    sem_down(&disk->sem_queue);
-    
     queue_append((queue_t**)&disk->requestQueue, (queue_t*)request);
 
     sem_up(&disk->sem_queue);
@@ -235,49 +243,27 @@ int disk_block_read(int block, void *buffer) {
         printf("\nDisk request appended to request queue\n");
     #endif
 
-    if(disk->signal == 0 && disk->empty == 1) {
-        task_resume(taskDiskMgr);
-    } 
-
     #ifdef DEBUG
         printf("\nDisk manager task resumed for read operation\n");
     #endif
 
     sem_up(&disk->sem_disk);
 
-    sem_down(&disk->sem_queue);
-    task_suspend(taskExec, &disk->taskQueue);
-    sem_up(&disk->sem_queue);
+    task_suspend(taskExec,  NULL);
     task_yield();
     return 0;
 }
 
 void handler_signal_disk( int signum) {
-
-    #ifdef DEBUG
-        printf("\nDisk signal handler invoked for signal %d\n", signum);
-    #endif
-
     if(signum != SIGUSR1) {
         return;
     }
-
-    #ifdef DEBUG
-        printf("\nReceived disk signal, processing...\n");
-        printf("\nHandling disk signal...\n");
-    #endif
-
-    if(disk == NULL || taskDiskMgr == NULL) {
-        perror("Disk manager not initialized");
-        return;
+    if(disk != NULL) {
+        disk->signal = 1;
+        sem_up(&disk->sem_disk); 
     }
-
-    disk->signal = 1;
-    disk->empty = 0;
-    task_resume(taskDiskMgr);
-
     #ifdef DEBUG
-        printf("\nDisk signal handler completed\n");
+        printf("\nDisk signal handler invoked and signaled disk manager.\n");
     #endif
 }
 
@@ -309,17 +295,18 @@ void disk_manager() {
     #endif
 
     while(1) {
-        sem_down(&disk->sem_disk);
 
-        #ifndef DEBUG
+        #ifdef DEBUG
             printf("\nDisk Manager getting disk semaphore...\n");
         #endif
 
-        if(disk->signal == 1) {
-            sem_down(&disk->sem_queue);
-            disk->signal = 0;
+        sem_down(&disk->sem_disk);
+        
+        sem_down(&disk->sem_queue);
 
-            if(disk->currentRequest == NULL && disk->currentRequest->task == NULL) {
+        if(disk->signal == 1) {
+            disk->signal = 0;
+            if(disk->currentRequest == NULL) {
                 perror("No task waiting for disk request");
                 sem_up(&disk->sem_queue);
                 continue;
@@ -327,43 +314,36 @@ void disk_manager() {
 
             task_t* task = disk->currentRequest->task;
             disk->currentRequest = NULL;
-            
+            disk->empty = 1;
+
             task_resume(task);
             
             #ifdef DEBUG
                 printf("\nDisk Manager resumed task %d from disk queue\n", task->id);
             #endif
-            sem_up(&disk->sem_queue);
         }
-
         
         
-        if(disk->requestQueue != NULL && disk->empty == 1) {
-            disk->empty = 0;
+        
+        if(disk->requestQueue != NULL && disk->empty) {
             disk_request* request = FCFS();
             
-            if(request == NULL) {
-                #ifdef DEBUG
-                    printf("\nNo disk requests to process, waiting...\n");
-                #endif
-                sem_up(&disk->sem_disk);
-                task_suspend(taskDiskMgr, &sleepQueue);
-            }
-
-            disk_cmd(request->operation, request->block, request->buffer);
-            disk->currentRequest = request;
-
-            #ifndef DEBUG 
+            if(request) {
+                disk->currentRequest = request;
+                disk_cmd(request->operation, request->block, request->buffer);
+                
+                #ifdef DEBUG 
                 printf("\nDisk MAnager request processed: Task %d, Operation %d, Block %d\n", 
-                       request->task->id, request->operation, request->block);
-            #endif
+                    request->task->id, request->operation, request->block);
+                #endif
+            }
+            
         }
-
-        sem_up(&disk->sem_disk);
-
+        
+        sem_up(&disk->sem_queue);
         #ifdef DEBUG
             printf("\nDisk Manager completed a cycle, waiting for next request...\n");
         #endif
-        task_suspend(taskDiskMgr, &sleepQueue);
     }
 }
+
