@@ -14,7 +14,23 @@ typedef struct t{
     int operation;
     void *buffer;
     int block;
+} disk_request;
+
+typedef struct {
+    int numBlocks;
+    int blockSize;
+
+    semaphore_t sem_disk;  // semaphore for disk operations
+
+    unsigned char signal;         // indicates if the disk is awake
+    unsigned char empty;          // indicates if the disk is free
+
+    task_t* taskQueue;      // queue of tasks waiting for disk operations
+    disk_request* currentRequest; // queue of tasks waiting for disk operations
+    semaphore_t sem_queue;        // semaphore for the disk queue
+    disk_request* requestQueue;   // queue of disk requests
 } disk_t;
+
 
 int disk_mgr_init(int *numBlocks, int *blockSize);
 
@@ -24,12 +40,11 @@ int disk_block_read(int block, void *buffer);
 // escrita de um bloco, do buffer para o disco
 int disk_block_write(int block, void *buffer);
 
-disk_t* FCFS();
-disk_t* SSTF();
-disk_t* CSCAN();
+disk_request* FCFS();
+disk_request* SSTF();
+disk_request* CSCAN();
 
 void handler_signal_disk( int signum);
 void disk_manager();
-int queue_contains(queue_t *task, queue_t **queue);
 
 #endif

@@ -16,7 +16,7 @@
 #define PRIO_MIN_TASK -20
 #define PRIO_MAX_TASK 20
 #define QUANTUM 20
-//#define DEBUG
+#define DEBUG
 
 int activationDispatcher = 0;
 int createDispatcher = 0;
@@ -36,7 +36,7 @@ void task_setDynamicPrio(task_t* task, int prio);
 task_t* findByPriority(task_t* queue);
 void growAll(task_t* queue, task_t* exclude);
 int initHandleTimer();
-void print_queue(task_t* queue);
+void print_queue(char* nome, task_t* queue);
 void handleTimer(int signum);
 int initTimer();
 
@@ -61,7 +61,6 @@ void after_ppos_init () {
         perror("error initializing task main\n");
         exit(1);
     }
-    
     if(initTimer()) {
         perror("ppos_init: error in setitimer");
         exit(1);
@@ -156,6 +155,8 @@ void before_task_suspend( task_t *task ) {
     // put your customization here
 #ifdef DEBUG
     printf("\ntask_suspend - BEFORE - [%d]", task->id);
+    print_queue("Prontas" ,readyQueue);
+    print_queue("Suspensas", sleepQueue);
 #endif
 }
 
@@ -163,6 +164,8 @@ void after_task_suspend( task_t *task ) {
     // put your customization here
 #ifdef DEBUG
     printf("\ntask_suspend - AFTER - [%d]", task->id);
+    print_queue("Prontas" ,readyQueue);
+    print_queue("Suspensas", sleepQueue);
 #endif
 }
 
@@ -170,6 +173,8 @@ void before_task_resume(task_t *task) {
     // put your customization here
 #ifdef DEBUG
     printf("\ntask_resume - BEFORE - [%d]", task->id);
+    print_queue("Prontas" ,readyQueue);
+    print_queue("Suspensas", sleepQueue);
 #endif
 
 }
@@ -178,6 +183,8 @@ void after_task_resume(task_t *task) {
     // put your customization here
 #ifdef DEBUG
     printf("\ntask_resume - AFTER - [%d]", task->id);
+    print_queue("Prontas" ,readyQueue);
+    print_queue("Suspensas", sleepQueue);
 #endif
 }
 
@@ -709,9 +716,12 @@ void task_setProperties(task_t* task, int priority) {
     #endif
 }
 
-void print_queue(task_t* queue) {
+void print_queue(char* nome , task_t* queue) {
+    
+    printf("\n%s:\n", nome);
+    
     if (!queue) {
-        perror("print_queue: fila não pode ser NULL\n");
+        printf("\n <-- Fila Vazia --> \n");
         return;
     }
 
