@@ -1,13 +1,14 @@
 #include "ppos_disk.h"
 
 //#define DISK_DEBUG
+#define SIGNAL_DEBUG
 
 disk_t disk;
 task_t* taskDiskMgr = NULL;
 struct sigaction sigDisk;
 
 task_t* ajust = NULL;
-void ajuste() {
+void ajuste(void *args) {
     while(1) {
         taskExec->quantum = 1;
     }
@@ -190,7 +191,7 @@ void handler_signal_disk( int signum) {
   if(signum != SIGUSR1)
     return;
 
-  #ifdef DISK_DEBUG
+  #ifdef SIGNAl_DEBUG
     printf("\nTratando sinal\n");
   #endif
   
@@ -199,9 +200,9 @@ void handler_signal_disk( int signum) {
     awake_disk_manager();
 }
 
-void disk_manager() {
+void disk_manager(void* args) {
   while (1) {
-    #ifdef DISK_DEBUG
+    #ifdef DiSK_DEBUG
     printf("\nIniciando disk manager\n");
     #endif
 
