@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "ppos.h"
-#include "ppos-disk-manager.h"
+#include "ppos_disk.h"
 
 #define NUMTASKS  16
 

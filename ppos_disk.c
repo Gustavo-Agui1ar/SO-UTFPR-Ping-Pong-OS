@@ -3,14 +3,22 @@
 #include <stdlib.h>
 #include <signal.h>
 
-//#define DEBUG
+/**
+ * 
+ #define DEBUG
+ #define READ
+ */
+#define MANAGER
+#define WRITE
 disk_t* disk = NULL;
 task_t* ajust = NULL;
 task_t* taskDiskMgr = NULL;
 struct sigaction sigDisk;
 
 void ajuste() {
-    while(1){task_yield();}
+    while(1) {
+        taskExec->quantum = 0;
+    }
 }
 
 int disk_mgr_init(int *numBlocks, int *blockSize) {
@@ -64,7 +72,7 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
         printf("\nDisk size: %d blocks, Block size: %d bytes\n", disk->numBlocks, disk->blockSize);
     #endif
 
-    if(sem_create(&disk->sem_disk, 0) < 0) {
+    if(mutex_create(&disk->sem_disk) < 0) {
         perror("Failed to create disk semaphore");
         free(disk);
         return -1;
@@ -76,7 +84,7 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
 
     if(sem_create(&disk->sem_queue, 1) < 0) {
         perror("Failed to create disk queue semaphore");
-        sem_destroy(&disk->sem_disk);
+        mutex_destroy(&disk->sem_disk);
         free(disk);
         return -1;
     }
@@ -91,10 +99,11 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
     disk->currentRequest = NULL;
     disk->taskQueue = NULL;
 
+
     taskDiskMgr = malloc(sizeof(task_t));
     if (!taskDiskMgr) {
         perror("Failed to allocate memory for disk manager task");
-        sem_destroy(&disk->sem_disk);
+        mutex_destroy(&disk->sem_disk);
         sem_destroy(&disk->sem_queue);
         free(disk);
         return -1;
@@ -102,18 +111,18 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
     
     if(task_create(taskDiskMgr, disk_manager, NULL) < 0) {
         perror("Failed to create disk manager task");
-        sem_destroy(&disk->sem_disk);
+        mutex_destroy(&disk->sem_disk);
         sem_destroy(&disk->sem_queue);
         free(disk);
         free(taskDiskMgr);
         return -1;
     } 
     
-    task_t* ajust = (task_t*)malloc(sizeof(task_t));
+    ajust = (task_t*)malloc(sizeof(task_t));
 
     if (!ajust) {
         perror("Failed to allocate memory for ajust disk manager task");
-        sem_destroy(&disk->sem_disk);
+        mutex_destroy(&disk->sem_disk);
         sem_destroy(&disk->sem_queue);
         free(disk);
         free(taskDiskMgr);
@@ -122,13 +131,16 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
 
     if(task_create(ajust, ajuste, NULL) < 0) {
         perror("Failed to create ajust disk manager task");
-        sem_destroy(&disk->sem_disk);
+        mutex_destroy(&disk->sem_disk);
         sem_destroy(&disk->sem_queue);
         free(disk);
         free(taskDiskMgr);
         free(ajust);
         return -1;
     }
+
+    ajust->prio_static = 20;
+    ajust->id = -1;
 
     sigDisk.sa_handler = handler_signal_disk;
     sigemptyset(&sigDisk.sa_mask);
@@ -154,13 +166,13 @@ int disk_block_write(int block, void *buffer) {
     }
 
 
-    #ifdef DEBUG
+    #ifdef WRITE
         printf("\nInitiating write operation for block %d\n", block);
     #endif
 
     sem_down(&disk->sem_queue);
 
-    #ifdef DEBUG
+    #ifdef WRITE
         printf("\nGetting disk semaphore for write operation...\n");
     #endif
 
@@ -168,7 +180,6 @@ int disk_block_write(int block, void *buffer) {
 
     if (!request) {
         perror("Failed to allocate memory for disk request");
-        sem_up(&disk->sem_disk);
         return -1;
     }
 
@@ -177,7 +188,7 @@ int disk_block_write(int block, void *buffer) {
     request->buffer = buffer;
     request->block = block;
 
-    #ifdef DEBUG
+    #ifdef WRITE
         printf("\nDisk request created for write operation on block %d\n", block);
     #endif
 
@@ -185,17 +196,17 @@ int disk_block_write(int block, void *buffer) {
 
     sem_up(&disk->sem_queue);
     
-    #ifdef DEBUG
+    #ifdef WRITE
     printf("\nDisk request appended to request queue\n");
     #endif
     
-    #ifdef DEBUG
+    #ifdef WRITE
     printf("\nDisk manager task resumed for write operation\n");
     #endif
     
-    sem_up(&disk->sem_disk);
+    mutex_unlock(&disk->sem_disk);
 
-    task_suspend(taskExec, NULL);
+    task_suspend(taskExec, &disk->taskQueue);
     task_yield();
     
     return 0;
@@ -208,13 +219,13 @@ int disk_block_read(int block, void *buffer) {
         return -1;
     }
 
-    #ifdef DEBUG
+    #ifdef READ
         printf("\nInitiating read operation for block %d\n", block);
     #endif
 
     sem_down(&disk->sem_queue);
 
-    #ifdef DEBUG
+    #ifdef READ
         printf("\nGetting disk semaphore for read operation...\n");
     #endif
 
@@ -222,7 +233,6 @@ int disk_block_read(int block, void *buffer) {
 
     if (!request) {
         perror("Failed to allocate memory for disk request");
-        sem_up(&disk->sem_disk);
         return -1;
     }
 
@@ -231,7 +241,7 @@ int disk_block_read(int block, void *buffer) {
     request->buffer = buffer;
     request->block = block;
 
-    #ifdef DEBUG
+    #ifdef READ
         printf("\nDisk request created for read operation on block %d\n", block);
     #endif
 
@@ -239,17 +249,17 @@ int disk_block_read(int block, void *buffer) {
 
     sem_up(&disk->sem_queue);
 
-    #ifdef DEBUG
+    #ifdef READ
         printf("\nDisk request appended to request queue\n");
     #endif
 
-    #ifdef DEBUG
+    #ifdef READ
         printf("\nDisk manager task resumed for read operation\n");
     #endif
 
-    sem_up(&disk->sem_disk);
+    mutex_unlock(&disk->sem_disk);
 
-    task_suspend(taskExec,  NULL);
+    task_suspend(taskExec,  &disk->taskQueue);
     task_yield();
     return 0;
 }
@@ -260,9 +270,9 @@ void handler_signal_disk( int signum) {
     }
     if(disk != NULL) {
         disk->signal = 1;
-        sem_up(&disk->sem_disk); 
+        mutex_unlock(&disk->sem_disk); 
     }
-    #ifdef DEBUG
+    #ifdef WRITE
         printf("\nDisk signal handler invoked and signaled disk manager.\n");
     #endif
 }
@@ -290,17 +300,17 @@ disk_request* FCFS() {
 
 void disk_manager() {
 
-    #ifdef DEBUG
+    #ifdef MANAGER
     printf(("Disk Manager started\n"));
     #endif
 
     while(1) {
 
-        #ifdef DEBUG
+        #ifdef MANAGER
             printf("\nDisk Manager getting disk semaphore...\n");
         #endif
 
-        sem_down(&disk->sem_disk);
+        mutex_lock(&disk->sem_disk);
         
         sem_down(&disk->sem_queue);
 
@@ -318,7 +328,7 @@ void disk_manager() {
 
             task_resume(task);
             
-            #ifdef DEBUG
+            #ifdef MANAGER
                 printf("\nDisk Manager resumed task %d from disk queue\n", task->id);
             #endif
         }
@@ -332,7 +342,7 @@ void disk_manager() {
                 disk->currentRequest = request;
                 disk_cmd(request->operation, request->block, request->buffer);
                 
-                #ifdef DEBUG 
+                #ifdef MANAGER 
                 printf("\nDisk MAnager request processed: Task %d, Operation %d, Block %d\n", 
                     request->task->id, request->operation, request->block);
                 #endif
@@ -341,7 +351,7 @@ void disk_manager() {
         }
         
         sem_up(&disk->sem_queue);
-        #ifdef DEBUG
+        #ifdef MANAGER
             printf("\nDisk Manager completed a cycle, waiting for next request...\n");
         #endif
     }

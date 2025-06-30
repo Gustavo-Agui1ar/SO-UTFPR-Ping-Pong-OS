@@ -20,7 +20,7 @@ typedef struct {
     int numBlocks;
     int blockSize;
 
-    semaphore_t sem_disk;  // semaphore for disk operations
+    mutex_t sem_disk;  // semaphore for disk operations
 
     unsigned char signal;         // indicates if the disk is awake
     unsigned char empty;          // indicates if the disk is free
