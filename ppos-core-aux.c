@@ -513,6 +513,9 @@ task_t* scheduler(void) {
         }
     }
 
+    // Restore dynamic priority of the best task and remove from queue
+    best->prio_dynamic = best->prio_static;
+
     #ifdef SCHEDULER_DEBUG
         printf("[scheduler] Melhor tarefa selecionada: %d com prioridade dinâmica %d e estática %d\n",
             best->id, best->prio_dynamic, best->prio_static);
@@ -520,9 +523,6 @@ task_t* scheduler(void) {
         print_queue("Depois", readyQueue);
     #endif
 
-    // Restore dynamic priority of the best task and remove from queue
-    best->prio_dynamic = best->prio_static;
-    queue_remove((queue_t**)&readyQueue, (queue_t*)best);
 
     return best;
 }

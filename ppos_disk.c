@@ -88,7 +88,7 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
         printf("\nDisk size: %d blocks, Block size: %d bytes\n", disk->numBlocks, disk->blockSize);
     #endif
 
-    if(sem_create(&disk->sem_work, 0) < 0) {
+    if(sem_create(&disk->sem_work, 1) < 0) {
     perror("Failed to create disk work semaphore");
     sem_destroy(&disk->sem_queue);
     free(disk);
@@ -302,9 +302,9 @@ void handler_signal_disk( int signum) {
 disk_request* FCFS() {
     #ifdef FCFS_DEF
         printf("\nProcessing disk requests using FCFS algorithm...\n");
+        print_queue_disk("Disk Request Queue", disk->requestQueue);
     #endif
 
-    print_queue_disk("Disk Request Queue", disk->requestQueue);
 
     if(disk->requestQueue == NULL) {
         return NULL;

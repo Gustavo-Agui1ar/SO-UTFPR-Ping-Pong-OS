@@ -1,8 +1,8 @@
 #include "ppos_disk.h"
 
-#define DISK_DEBUG
+//#define DISK_DEBUG
 
-disk_t* disk;
+disk_t disk;
 task_t* taskDiskMgr = NULL;
 struct sigaction sigDisk;
 
@@ -26,26 +26,19 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
   *numBlocks = disk_cmd(DISK_CMD_DISKSIZE, 0, 0);
   *blockSize = disk_cmd(DISK_CMD_BLOCKSIZE, 0, 0);
 
-  disk = (disk_t*) malloc(sizeof(disk_t));
+  disk.numBlocks = *numBlocks;
+  disk.blockSize = *blockSize;
 
-  if (!disk) {
-    perror("Failed to allocate memory for disk");
-    return -1;
-  }
-
-  disk->numBlocks = *numBlocks;
-  disk->blockSize = *blockSize;
-
-  if(mutex_create(&disk->mut_disk) < 0) {
+  if(mutex_create(&disk.mut_disk) < 0) {
     perror("Failed to create disk semaphore");
     return -1;
   }
 
-  disk->signal = 0;
-  disk->empty = 1;
-  disk->requestQueue = NULL;
-  disk->currentRequest = NULL;
-  disk->taskQueue = NULL;
+  disk.signal = 0;
+  disk.empty = 1;
+  disk.requestQueue = NULL;
+  disk.currentRequest = NULL;
+  disk.taskQueue = NULL;
 
   taskDiskMgr = (task_t*) malloc(sizeof(task_t));
 
@@ -112,12 +105,20 @@ void suspend_disk_manager() {
   taskDiskMgr->state = 'S';
 }
 
+void awake_disk_manager() {
+  #ifdef DISK_DEBUG
+    printf("\nAcordando disk manager\n");
+  #endif
+  queue_append((queue_t**)&readyQueue, (queue_t*)taskDiskMgr);
+  taskDiskMgr->state = 'R';
+}
+
 void suspend_task(task_t* task) {
   #ifdef DISK_DEBUG
     printf("\nSuspendendo tarefa com id %d\n", task->id);
   #endif
   queue_remove((queue_t**)&readyQueue, (queue_t*)task);
-  queue_append((queue_t**)&disk->taskQueue, (queue_t*)task);
+  queue_append((queue_t**)&disk.taskQueue, (queue_t*)task);
   task->state = 'S';
 }
 
@@ -125,26 +126,26 @@ void awake_task(task_t* task) {
   #ifdef DISK_DEBUG
     printf("\nAcordando tarefa com id %d\n", task->id);
   #endif
-  queue_remove((queue_t**)&disk->taskQueue, (queue_t*)task);
+  queue_remove((queue_t**)&disk.taskQueue, (queue_t*)task);
   queue_append((queue_t**)&readyQueue, (queue_t*)task);
   task->state = 'R';
 }
 
 disk_request* FCFS() {
-  if(disk->requestQueue == NULL)
+  if(disk.requestQueue == NULL)
     return NULL;
 
   #ifdef DISK_DEBUG
     printf("\nFCFS\n");
   #endif
 
-  disk_request* request = disk->requestQueue;
-  queue_remove((queue_t**)&disk->requestQueue, (queue_t*)request);
+  disk_request* request = disk.requestQueue;
+  queue_remove((queue_t**)&disk.requestQueue, (queue_t*)request);
   return request;
 }
 
 int disk_block_read(int block, void *buffer) {
-  if (block < 0 || block >= disk->numBlocks) {
+  if (block < 0 || block >= disk.numBlocks) {
       perror("Invalid disk or block number");
       return -1;
   }
@@ -153,10 +154,10 @@ int disk_block_read(int block, void *buffer) {
     printf("\nIniciando disk_block_read de leitura\n");
   #endif
 
-  mutex_lock(&disk->mut_disk);
+  mutex_lock(&disk.mut_disk);
   disk_request* request = create_disk_request(taskExec, DISK_CMD_READ, buffer, block);
-  queue_append((queue_t**)&disk->requestQueue, (queue_t*)request);
-  mutex_unlock(&disk->mut_disk);
+  queue_append((queue_t**)&disk.requestQueue, (queue_t*)request);
+  mutex_unlock(&disk.mut_disk);
 
   suspend_task(taskExec);
   task_yield();
@@ -165,7 +166,7 @@ int disk_block_read(int block, void *buffer) {
 }
 
 int disk_block_write(int block, void *buffer) {
-  if (block < 0 || block >= disk->numBlocks) {
+  if (block < 0 || block >= disk.numBlocks) {
       perror("Invalid disk or block number");
       return -1;
   }
@@ -174,10 +175,10 @@ int disk_block_write(int block, void *buffer) {
     printf("\nIniciando disk_block_write de leitura\n");
   #endif
 
-  mutex_lock(&disk->mut_disk);
+  mutex_lock(&disk.mut_disk);
   disk_request* request = create_disk_request(taskExec, DISK_CMD_WRITE, buffer, block);
-  queue_append((queue_t**)&disk->requestQueue, (queue_t*)request);
-  mutex_unlock(&disk->mut_disk);
+  queue_append((queue_t**)&disk.requestQueue, (queue_t*)request);
+  mutex_unlock(&disk.mut_disk);
 
   suspend_task(taskExec);
   task_yield();
@@ -193,19 +194,9 @@ void handler_signal_disk( int signum) {
     printf("\nTratando sinal\n");
   #endif
   
-  if(!disk) {
-  perror("Disk not initialized");
-  return;
-}
-
-  disk->signal = 1;
-  if (taskDiskMgr->state == 'S') {
-    #ifdef DISK_DEBUG
-    printf("\nAcordando disk manager\n");
-    #endif
-    queue_append((queue_t**)&readyQueue, (queue_t*)taskDiskMgr);
-    taskDiskMgr->state = 'R';
-  }
+  disk.signal = 1;
+  if (taskDiskMgr->state == 'S')
+    awake_disk_manager();
 }
 
 void disk_manager() {
@@ -214,33 +205,33 @@ void disk_manager() {
     printf("\nIniciando disk manager\n");
     #endif
 
-    mutex_lock(&disk->mut_disk);
+    mutex_lock(&disk.mut_disk);
 
-    if (disk->signal == 1) {
-      disk->signal = 0;
+    if (disk.signal == 1) {
+      disk.signal = 0;
 
-      task_t* task = disk->currentRequest->task;
-      disk->currentRequest = NULL;
-      disk->empty = 1;
+      task_t* task = disk.currentRequest->task;
+      disk.currentRequest = NULL;
+      disk.empty = 1;
 
       awake_task(task);
     }
 
-    if(disk->requestQueue != NULL && disk->empty) {
+    if(disk.requestQueue != NULL && disk.empty) {
       disk_request* request = FCFS();
       
       if (request) {
-        disk->currentRequest = request;
+        disk.currentRequest = request;
         disk_cmd(request->operation, request->block, request->buffer);
-        disk->empty = 0;
+        disk.empty = 0;
       }    
     }
   
-    mutex_unlock(&disk->mut_disk);
+    mutex_unlock(&disk.mut_disk);
     suspend_disk_manager();
 
     #ifdef DISK_DEBUG
-    printf("\nSuspendendo disk manager\n");
+    printf("\nFinalizando disk manager\n");
     #endif
     task_yield();
   }
