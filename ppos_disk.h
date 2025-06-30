@@ -20,15 +20,15 @@ typedef struct {
     int numBlocks;
     int blockSize;
 
-    mutex_t sem_disk;  // semaphore for disk operations
-
+    semaphore_t sem_work;  // semaphore for disk operations
+    //mutex_t mut_disk;
     unsigned char signal;         // indicates if the disk is awake
     unsigned char empty;          // indicates if the disk is free
 
     task_t* taskQueue;      // queue of tasks waiting for disk operations
     disk_request* currentRequest; // queue of tasks waiting for disk operations
     semaphore_t sem_queue;        // semaphore for the disk queue
-    disk_request* requestQueue;   // queue of disk requests
+    disk_request* requestQueue;   // queue of disk requests 
 } disk_t;
 
 
