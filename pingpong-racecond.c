@@ -31,7 +31,7 @@ void taskBody(char *id)
       
       sem_up (&s) ;
       if ((soma % 1000) == 0)
-      printf("\nProgresso %ld/%ld [%s]", soma, soma_correta, id); fflush(stdout);
+        printf("\nProgresso %ld/%ld [%s]", soma, soma_correta, id); fflush(stdout);
    }
    printf("\n%s repetiu %d vezes e terminou!", id, i); fflush(stdout);
    task_exit (0) ;

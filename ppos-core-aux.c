@@ -16,10 +16,13 @@
 #define PRIO_MIN_TASK -20
 #define PRIO_MAX_TASK 20
 #define QUANTUM 20
-//#define DEBUG
-//#define SWITCH_DEBUG
-//#define SCHEDULER_DEBUG
-
+/**
+ * 
+ #define DEBUG
+ #define SCHEDULER_DEBUG
+ #define SWITCH_DEBUG
+ */
+ 
 int activationDispatcher = 0;
 int createDispatcher = 0;
 int deathDispatcher = 0;
@@ -485,44 +488,44 @@ int after_mqueue_msgs (mqueue_t *queue) {
 //------------------------------------------------------------ ESCALONAMENTO -----------------------------------------------------------------
 
 task_t* scheduler(void) {
+    
+    #ifdef SCHEDULER_DEBUG
+        printf("\n[scheduler] Iniciando escalonamento...\n");
+        print_queue("Prontas", readyQueue);
+    #endif
+    
     if (!readyQueue)
         return NULL;
 
-    task_t *head = readyQueue->next;
+    if(readyQueue->next == readyQueue) {
+        return readyQueue;
+    }
+
+    task_t *head = readyQueue;
     task_t *current = head;
     task_t *best = head;
 
-    #ifdef SCHEDULER_DEBUG
-        printf("[scheduler] Iniciando escalonamento de tarefas\n");
-        print_queue("Antes", readyQueue);
-    #endif
-
-
-    while (current != head || current == best) {
-        // Find the best task
+     do{
         if (current->prio_dynamic < best->prio_dynamic ||
             (current->prio_dynamic == best->prio_dynamic && current->prio_static < best->prio_static)) {
             best = current;
         }
-        
+        current = current->next;
+    }while (current != head);
+
+    current = head;
+
+    do {
         current->prio_dynamic = DEFINE_PRIO(current->prio_dynamic + GROWTH_FACTOR);
         current = current->next;
-        // Break after one full traversal
-        if (current == head) {
-            break;
-        }
-    }
+    } while(current != head); 
 
-    // Restore dynamic priority of the best task and remove from queue
-    best->prio_dynamic = best->prio_static;
+    task_setprio(best, best->prio_static);
 
     #ifdef SCHEDULER_DEBUG
-        printf("[scheduler] Melhor tarefa selecionada: %d com prioridade dinâmica %d e estática %d\n",
-            best->id, best->prio_dynamic, best->prio_static);
-
-        print_queue("Depois", readyQueue);
+        printf("\n[scheduler] Tarefa %d selecionada com prioridade dinâmica %d e estática %d\n", 
+               best->id, best->prio_dynamic, best->prio_static);
     #endif
-
 
     return best;
 }
@@ -562,35 +565,42 @@ unsigned int systime() {
 
 void handleTimer(int signum) {
     // Verifica se a tarefa atual está definida
-    if (!taskExec) {
-        fprintf(stderr, "handleTimer: taskExec não pode ser NULL\n");
-        return;
+    switch (signum)
+    {
+        case  SIGALRM:
+            if (!taskExec) {
+                fprintf(stderr, "handleTimer: taskExec não pode ser NULL\n");
+                return;
+            }
+
+            // Atualiza tempos
+            taskExec->running_time++;
+            _systemTime++;
+
+            // Evita preempção do dispatcher (tarefa id == 1)
+            if (taskExec->id == 1) {
+                return;
+            }
+
+            // Se quantum acabou, devolve o processador
+            if (--taskExec->quantum == 0) {
+                taskExec->quantum = QUANTUM;
+                #ifdef DEBUG
+                    printf("[handleTimer] Tarefa %d atingiu fim do quantum. Chamando task_yield().\n", taskExec->id);
+                #endif
+                task_yield();
+                return;
+            }
+
+            // Mensagem de depuração, se ativada
+            #ifdef DEBUG
+                printf("[handleTimer] Tarefa %d: Quantum restante: %d | Tempo do sistema: %d\n", 
+                    taskExec->id, taskExec->quantum, _systemTime);
+            #endif
+            break;
+        default:
+            break;
     }
-
-    // Atualiza tempos
-    taskExec->running_time++;
-    _systemTime++;
-
-    // Evita preempção do dispatcher (tarefa id == 1)
-    if (taskExec->id == 1) {
-        return;
-    }
-
-    // Se quantum acabou, devolve o processador
-    if (--taskExec->quantum == 0) {
-        taskExec->quantum = QUANTUM;
-        #ifdef DEBUG
-            printf("[handleTimer] Tarefa %d atingiu fim do quantum. Chamando task_yield().\n", taskExec->id);
-        #endif
-        task_yield();
-        return;
-    }
-
-    // Mensagem de depuração, se ativada
-    #ifdef DEBUG
-        printf("[handleTimer] Tarefa %d: Quantum restante: %d | Tempo do sistema: %d\n", 
-               taskExec->id, taskExec->quantum, _systemTime);
-    #endif
 }
 
 

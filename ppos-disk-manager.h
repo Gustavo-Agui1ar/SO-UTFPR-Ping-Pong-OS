@@ -7,13 +7,25 @@
 #ifndef __DISK_MGR__
 #define __DISK_MGR__
 
+#include "disk-driver.h"
+#include "ppos-data.h"
+#include "ppos-core-globals.h"
+#include "ppos.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <signal.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/signal.h>
+#include <errno.h>
+
 //#define DEBUG_DISK 1
 
 // estruturas de dados e rotinas de inicializacao e acesso
 // a um dispositivo de entrada/saida orientado a blocos,
 // tipicamente um disco rigido.
 
-// structura de dados que representa um pedido de leitura/escrita ao disco
+// structura de dados que representa um pedido de leitura/escrita ao disco .
 typedef struct diskrequest_t {
     struct diskrequest_t* next;
     struct diskrequest_t* prev;
@@ -40,21 +52,29 @@ typedef struct {
     diskrequest_t* requestQueue;
 } disk_t;
 
-
+extern disk_t disco;
+extern task_t taskDiskMgr;
+extern int finalizadas;
 
 // inicializacao do gerente de disco
 // retorna -1 em erro ou 0 em sucesso
 // numBlocks: tamanho do disco, em blocos
 // blockSize: tamanho de cada bloco do disco, em bytes
-int disk_mgr_init (int *numBlocks, int *blockSize) ;
+int disk_mgr_init (int *numBlocks, int *blockSize);
 
 // leitura de um bloco, do disco para o buffer
-int disk_block_read (int block, void *buffer) ;
+int disk_block_read (int block, void *buffer);
 
 // escrita de um bloco, do buffer para o disco
-int disk_block_write (int block, void *buffer) ;
+int disk_block_write (int block, void *buffer);
 
 // escalonador de requisições do disco
-diskrequest_t* disk_scheduler();
+diskrequest_t* disk_scheduler(diskrequest_t* request);
+
+void bodyDiskManager(void *arg);
+
+void diskSignalHandler(int signum);
+
+//void clean_exit_on_sig(int sig_num);
 
 #endif

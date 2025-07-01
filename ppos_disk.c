@@ -8,11 +8,10 @@
  #define READ
  #define WRITE
  #define FCFS_DEF
- #define SIGNAL
  #define MANAGER
+ #define SIGNAL
  */
 disk_t* disk = NULL;
-task_t* ajust = NULL;
 task_t* taskDiskMgr = NULL;
 struct sigaction sigDisk;
 
@@ -29,12 +28,6 @@ void print_queue_disk(char* nome, disk_request* queue) {
         current = current->next;
     } while (current != queue);
     printf("\n");
-}
-
-void ajuste() {
-    while(1) {
-        taskExec->quantum = 0;
-    }
 }
 
 int disk_mgr_init(int *numBlocks, int *blockSize) {
@@ -134,30 +127,6 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
         free(taskDiskMgr);
         return -1;
     } 
-    
-    ajust = (task_t*)malloc(sizeof(task_t));
-
-    if (!ajust) {
-        perror("Failed to allocate memory for ajust disk manager task");
-        sem_destroy(&disk->sem_work);
-        sem_destroy(&disk->sem_queue);
-        free(disk);
-        free(taskDiskMgr);
-        return -1;
-    }
-
-    if(task_create(ajust, ajuste, NULL) < 0) {
-        perror("Failed to create ajust disk manager task");
-        sem_destroy(&disk->sem_work);
-        sem_destroy(&disk->sem_queue);
-        free(disk);
-        free(taskDiskMgr);
-        free(ajust);
-        return -1;
-    }
-
-    task_setprio(ajust, 20);
-    ajust->id = -1;
 
     sigDisk.sa_handler = handler_signal_disk;
     sigemptyset(&sigDisk.sa_mask);
@@ -177,214 +146,167 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
 
 int disk_block_write(int block, void *buffer) {
 
-    if (!disk || block < 0 || block >= disk->numBlocks) {
-        perror("Invalid disk or block number");
+   if(block < 0 || block > disk->numBlocks) {
         return -1;
-    }
+   }
 
+   
+   mutex_lock(&disk->mut_disk);
 
-    #ifdef WRITE
-        printf("\nInitiating write operation for block %d\n", block);
-    #endif
+   #ifdef WRITE
+        printf("\n[disk_block_write] Initiating write operation for block %d\n", block);
+   #endif
 
-    sem_down(&disk->sem_queue);
-
-    #ifdef WRITE
-        printf("\nGetting disk semaphore for write operation...\n");
-    #endif
-
-    disk_request* request = malloc(sizeof(disk_request));
-
-    if (!request) {
-        perror("Failed to allocate memory for disk request");
+   disk_request* request = malloc(sizeof(disk_request));
+   if (!request) {
+        mutex_unlock(&disk->mut_disk);
         return -1;
-    }
+   }
 
     request->task = taskExec;
     request->operation = DISK_CMD_WRITE;
     request->buffer = buffer;
     request->block = block;
 
-    #ifdef WRITE
-        printf("\nDisk request created for write operation on block %d\n", block);
-    #endif
+    sem_down(&disk->sem_queue);
 
     queue_append((queue_t**)&disk->requestQueue, (queue_t*)request);
 
     sem_up(&disk->sem_queue);
-    
-    #ifdef WRITE
-    printf("\nDisk request appended to request queue\n");
-    #endif
-    
-    #ifdef WRITE
-    printf("\nDisk Manager: Up Semaphore\n");
-    #endif
-    
-    sem_up(&disk->sem_work);
 
-    task_suspend(taskExec, &disk->taskQueue);
-    task_yield();
-    
-    return 0;
+    if(taskDiskMgr->state == 'S') {
+        #ifdef WRITE
+            printf("\n[disk_block_write] Disk manager is suspended, waking it up\n");
+        #endif
+        disk->signal = 1;
+        task_resume(taskDiskMgr);   
+     }
+
+   mutex_unlock(&disk->mut_disk);
+     
+   task_suspend(taskExec, &disk->taskQueue);
+   task_yield();
+   return 0;
 }
 
 int disk_block_read(int block, void *buffer) {
 
-   if (!disk || block < 0 || block >= disk->numBlocks) {
-        perror("Invalid disk or block number");
+   if (block < 0 || block > disk->numBlocks) {
         return -1;
     }
+     
+   mutex_lock(&disk->mut_disk);
 
-    #ifdef READ
-        printf("\nInitiating read operation for block %d\n", block);
-    #endif
+   #ifdef WRITE
+        printf("\n[disk_block_write] Initiating write operation for block %d\n", block);
+   #endif
 
-    sem_down(&disk->sem_queue);
-
-    #ifdef READ
-        printf("\nGetting disk semaphore for read operation...\n");
-    #endif
-
-    disk_request* request = malloc(sizeof(disk_request));
-
-    if (!request) {
-        perror("Failed to allocate memory for disk request");
+   disk_request* request = malloc(sizeof(disk_request));
+   if (!request) {
+        mutex_unlock(&disk->mut_disk);
         return -1;
-    }
+   }
 
     request->task = taskExec;
     request->operation = DISK_CMD_READ;
     request->buffer = buffer;
     request->block = block;
 
-    #ifdef READ
-        printf("\nDisk request created for read operation on block %d\n", block);
-    #endif
+    sem_down(&disk->sem_queue);
 
     queue_append((queue_t**)&disk->requestQueue, (queue_t*)request);
 
     sem_up(&disk->sem_queue);
 
-    #ifdef READ
-        printf("\nDisk request appended to request queue\n");
-    #endif
-
-    #ifdef READ
-    printf("\nDisk Manager: Up semaphore\n");
-    #endif
-
-    sem_up(&disk->sem_work);
-
-    task_suspend(taskExec,  &disk->taskQueue);
-    task_yield();
-    return 0;
-}
-
-void handler_signal_disk( int signum) {
-    if(signum != SIGUSR1) {
-        return;
-    }
-
-    #ifdef SIGNAL
-        printf("\nReceived signal to wake up disk manager\n");
-    #endif
-
-    if(disk != NULL) {
-        #ifdef SIGNAL
-            printf("\nWaking up disk manager...\n");
+    if(taskDiskMgr->state == 'S') {
+        #ifdef WRITE
+            printf("\n[disk_block_write] Disk manager is suspended, waking it up\n");
         #endif
         disk->signal = 1;
-        sem_up(&disk->sem_work); 
-    }
+        task_resume(taskDiskMgr);   
+     }
+
+   mutex_unlock(&disk->mut_disk);
+     
+   task_suspend(taskExec, &disk->taskQueue);
+   task_yield();    
+   return 0;
 }
 
 disk_request* FCFS() {
-    #ifdef FCFS_DEF
-        printf("\nProcessing disk requests using FCFS algorithm...\n");
-        print_queue_disk("Disk Request Queue", disk->requestQueue);
-    #endif
 
-
-    if(disk->requestQueue == NULL) {
+    if(disk->requestQueue == NULL)
         return NULL;
-    }
 
-    disk_request* request = disk->requestQueue;
-
-    queue_remove((queue_t**)&disk->requestQueue, (queue_t*)request);
-
-    #ifdef FCFS_DEF
-        printf("\nAfter remove queue: Disk Request Queue\n");
-        print_queue_disk("Disk Request Queue", disk->requestQueue);
-
-        printf("\nFCFS: Processing request for task %d, operation %d, block %d\n", 
-               request->task->id, request->operation, request->block);
-    #endif
-
-    return request;
+    return disk->requestQueue;
 }
+
+disk_request* SSTF() {
+    if()
+}
+
 
 void disk_manager() {
 
     #ifdef MANAGER
-    printf(("Disk Manager started\n"));
+        printf("\nDisk manager started\n");
     #endif
 
     while(1) {
 
         #ifdef MANAGER
-            printf("\nDisk Manager: Waiting semaphore disk \n");
+            printf("\nDisk manager waiting mutex\n");
         #endif
 
-        sem_down(&disk->sem_work);
-        
+        mutex_lock(&disk->mut_disk);
+
         #ifdef MANAGER
-            printf("\nDisk Manager: Semaphore acquired\n");
+            printf("\nDisk manager acquired mutex\n");
         #endif
 
-        sem_down(&disk->sem_queue);
-
-        if(disk->signal == 1) {
+        if(disk->signal) {
             disk->signal = 0;
-            if(disk->currentRequest == NULL) {
-                perror("No task waiting for disk request");
-                sem_up(&disk->sem_queue);
-                continue;
-            }
-
-            task_t* task = disk->currentRequest->task;
-            disk->currentRequest = NULL;
-            disk->empty = 1;
-
-            task_resume(task);
             
-            #ifdef MANAGER
-                printf("\nDisk Manager resumed task %d from disk queue\n", task->id);
-            #endif
+            if(disk->currentRequest) { // ah o felipao faz algo muito estranho nesta parte ele n armazena a ultima tarefa da requisisão ele so acorda a primeira da queue
+                #ifdef MANAGER
+                    printf("\nDisk manager task %d request completed\n", disk->currentRequest->task->id);
+                #endif
+                
+                task_resume(disk->currentRequest->task);
+
+                disk->currentRequest = NULL;
+                disk->empty = 1;
+            }
         }
-        
-        
-        
+
         if(disk->requestQueue != NULL && disk->empty) {
             disk_request* request = FCFS();
             
-            if(request) {
+            if (request) {
+
+                #ifdef MANAGER
+                    printf("\nDisk manager processing request from task %d\n", request->task->id);
+                #endif  
+
                 disk->currentRequest = request;
                 disk_cmd(request->operation, request->block, request->buffer);
-                
-                #ifdef MANAGER 
-                printf("\nDisk MAnager request processed: Task %d, Operation %d, Block %d\n", 
-                    request->task->id, request->operation, request->block);
-                #endif
-            }
-            
+                sem_down(&disk->sem_queue);
+                queue_remove((queue_t**)&disk->requestQueue, (queue_t*)request);
+                sem_up(&disk->sem_queue);
+                disk->empty = 0;
+            }       
         }
-        
-        sem_up(&disk->sem_queue);
-        #ifdef MANAGER
-            printf("\nDisk Manager completed a cycle, waiting for next request...\n");
-        #endif
+        mutex_unlock(&disk->mut_disk);
     }
 }
 
+void handler_signal_disk(int signum) {
+    if(signum != SIGUSR1)
+        return;
+    
+    #ifdef SIGNAL
+        printf("\nDisk signal handler triggered\n");
+    #endif
+
+    disk->signal = 1;
+}
