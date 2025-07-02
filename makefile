@@ -3,7 +3,7 @@ CC = gcc
 CFLAGS = -Wall -g -lrt
 
 # Arquivos-fonte
-OBJS = pingpong-disco2.c disk-driver.o m-ppos_disk.c ppos-core-aux.o ppos-all.o  queue.o 
+OBJS = pingpong-disco2.c disk-driver.o ppos_disk.c ppos-core-aux.o ppos-all.o  queue.o 
 
 # Executável final
 TARGET = test-disk-porra

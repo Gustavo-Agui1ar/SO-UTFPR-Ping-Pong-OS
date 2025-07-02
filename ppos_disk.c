@@ -7,13 +7,42 @@
  * 
  #define READ
  #define WRITE
- #define FCFS_DEF
  #define MANAGER
  #define SIGNAL
+ #define FCFS_FUN
+ #define SSTF_FUN
  */
+
+#define CSCAN_FUN
+
 disk_t* disk = NULL;
 task_t* taskDiskMgr = NULL;
 struct sigaction sigDisk;
+
+disk_request* disk_scheduler() {
+    disk_request* request = NULL;
+
+    #ifdef FCFS_FUN
+        request = FCFS();
+        if(request != NULL)
+            disk->totalBlocks += abs(disk->currentBlock - request->block);
+    #elif defined(SSTF_FUN)
+        request = SSTF();
+        if(request != NULL)
+        disk->totalBlocks += abs(disk->currentBlock - request->block);
+    #elif defined(CSCAN_FUN)
+        request = CSCAN();
+        if(request != NULL)
+            disk->totalBlocks += (request->block > disk->currentBlock) ? 
+                             (request->block - disk->currentBlock) : 
+                             (disk->numBlocks - disk->currentBlock + request->block);
+    #else
+        printf("Erro: Nenhum algoritmo de escalonamento definido.\n");
+    #endif
+
+    return request;
+}
+
 
 void print_queue_disk(char* nome, disk_request* queue) {
     if (!queue) {
@@ -104,6 +133,8 @@ int disk_mgr_init(int *numBlocks, int *blockSize) {
     #endif
 
     disk->signal = 0;
+    disk->totalBlocks = 0;
+    disk->currentBlock = 0;
     disk->empty = 1;
     disk->requestQueue = NULL;
     disk->currentRequest = NULL;
@@ -242,9 +273,80 @@ disk_request* FCFS() {
 }
 
 disk_request* SSTF() {
-    if()
+    sem_down(&disk->sem_queue);
+
+    if(disk->requestQueue == NULL) {
+        sem_up(&disk->sem_queue);
+        return NULL;
+    }
+
+    if(disk->requestQueue->next == disk->requestQueue) {
+        sem_up(&disk->sem_queue);
+        return disk->requestQueue;
+    }
+
+    disk_request* current = disk->requestQueue;
+    disk_request* closest = current;
+    disk_request* head = disk->requestQueue;
+
+    do {
+        if(abs(disk->currentBlock - current->block) < abs(disk->currentBlock  - closest->block))
+            closest = current;
+        current = current->next;
+    } while(current != head);
+
+    sem_up(&disk->sem_queue);
+
+    return closest;
 }
 
+disk_request* CSCAN() {
+    sem_down(&disk->sem_queue);
+
+    if(disk->requestQueue == NULL) {
+        sem_up(&disk->sem_queue);
+        return NULL;
+    }
+
+    if(disk->requestQueue->next == disk->requestQueue) {
+        sem_up(&disk->sem_queue);
+        return disk->requestQueue;
+    }
+
+    int existsgreater = 0;
+    disk_request* current = disk->requestQueue;
+    disk_request* best = disk->requestQueue;
+
+    do {
+        if(current->block >= disk->currentBlock) {
+            if(current->block < best->block) {
+                best = current;
+                existsgreater = 1;
+            }
+        }
+        current = current->next;
+    } while(current != disk->requestQueue);
+
+    if(existsgreater) {
+        sem_up(&disk->sem_queue);
+        return best;
+    }
+
+    current = disk->requestQueue;
+
+    do {
+        if(current->block <= disk->currentBlock) {
+            if(current->block > best->block) {
+                best = current;
+            }
+        }
+        current = current->next;
+    } while(current != disk->requestQueue);
+
+
+    sem_up(&disk->sem_queue);
+    return disk->requestQueue;
+}
 
 void disk_manager() {
 
@@ -267,20 +369,21 @@ void disk_manager() {
         if(disk->signal) {
             disk->signal = 0;
             
-            if(disk->currentRequest) { // ah o felipao faz algo muito estranho nesta parte ele n armazena a ultima tarefa da requisisão ele so acorda a primeira da queue
+            if(disk->currentRequest) { 
                 #ifdef MANAGER
                     printf("\nDisk manager task %d request completed\n", disk->currentRequest->task->id);
                 #endif
                 
                 task_resume(disk->currentRequest->task);
 
+                disk->currentBlock = disk->currentRequest->block;
                 disk->currentRequest = NULL;
                 disk->empty = 1;
             }
         }
 
         if(disk->requestQueue != NULL && disk->empty) {
-            disk_request* request = FCFS();
+            disk_request* request = disk_scheduler();
             
             if (request) {
 
@@ -297,6 +400,12 @@ void disk_manager() {
             }       
         }
         mutex_unlock(&disk->mut_disk);
+        /*
+        */
+        if(countTasks <= 2) {
+            printf("\nTotal Blocks Processed: %d\n", disk->totalBlocks);
+            task_exit(1);
+        }
     }
 }
 

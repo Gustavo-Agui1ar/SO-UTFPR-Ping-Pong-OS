@@ -145,6 +145,7 @@ void after_task_switch ( task_t *task ) {
     #endif
     
     taskExec->id != 1 ? taskExec->activations++ : activationDispatcher++;  
+    
 }
 
 void before_task_yield () {
@@ -578,7 +579,7 @@ void handleTimer(int signum) {
             _systemTime++;
 
             // Evita preempção do dispatcher (tarefa id == 1)
-            if (taskExec->id == 1) {
+            if (taskExec == taskDisp) {
                 return;
             }
 

@@ -19,6 +19,8 @@ typedef struct t{
 typedef struct {
     int numBlocks;
     int blockSize;
+    int currentBlock;
+    int totalBlocks;
 
     semaphore_t sem_work;  // semaphore for disk operations
     mutex_t mut_disk;
